@@ -109,6 +109,7 @@ class Checks(unittest.TestCase):
             self.assertEqual(encoded['content'][0]['type'],'text')
             parts=[{'type':'input_text','text':x['text']} if x['type']=='text' else
                    {'type':'input_image','image_url':'data:image/png;base64,'+x['data']} for x in encoded['content']]
+            parts[0]['text']='Wall time: 1.5 seconds\nOutput:\n'+parts[0]['text']
             items=[]
             for index in range(2):
                 items += [{'type':'function_call','call_id':str(index),'name':'move'},
@@ -118,7 +119,7 @@ class Checks(unittest.TestCase):
             self.assertEqual(sum(p['type']=='input_image' for x in outputs for p in x.get('output',[])),30)
             old=next(json.loads(p['text']) for p in outputs[1]['output'] if p.get('text','').startswith('{'))
             self.assertEqual(old['temporal_rgb']['frames'],[])
-            self.assertFalse(any(p.get('text','').startswith('[RUA RGB frame ') for p in outputs[1]['output']))
+            self.assertFalse(any('[RUA RGB frame ' in p.get('text','') for p in outputs[1]['output']))
             store.close()
 
     def test_wall_cut_waits_for_acknowledgement(self):

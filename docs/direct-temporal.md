@@ -34,6 +34,14 @@ action results, failures and text history remain. Duplicate references to one
 clip retain only the latest occurrence. Original artifacts remain available to
 the recorder. This policy does not summarize the task or promise cache hits.
 
+The planner SDK must preserve the tool's structured observation JSON. Its own
+tool-output truncation can corrupt JSON before this policy sees it, preventing
+image ownership detection. Set an adequate per-run tool-output allowance in the
+SDK integration and reject undecodable temporal observations before generation.
+Labels can carry a runtime timing prefix; eviction removes the entire labeled
+text block together with its image. A short fixture that omits real-sized JSON
+does not validate this boundary.
+
 ## Motion contract
 
 `direct_sim_seconds=1.0` advertises an optional shared gripper budget. Schemas

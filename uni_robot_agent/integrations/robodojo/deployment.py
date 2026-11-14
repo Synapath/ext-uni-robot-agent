@@ -125,10 +125,23 @@ def plan(args, runtime, output, run_id):
     command = [runtime.python, '-m', 'uni_robot_agent.integrations.robodojo.environment.server',
         '--native-root', str(native), '--task', task, '--layout', str(layout), '--layout-sha256', digest,
         '--output-dir', str(output / 'environment'), '--run-id', run_id, '--host', args.host, '--port', str(port)]
+    if getattr(args, 'rua_source_root', None):
+        source = args.rua_source_root.resolve(strict=True)
+        if not (source / 'uni_robot_agent/__init__.py').is_file():
+            raise ValueError('Source overlay must contain uni_robot_agent')
+        command = [runtime.python, '-c',
+            "import sys,runpy;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('uni_robot_agent.integrations.robodojo.environment.server',run_name='__main__')",
+            str(source), *command[3:]]
     if args.depth is False:
         command.append('--no-depth')
     if getattr(args, 'camera_calibration', None) is False:
         command.append('--no-camera-calibration')
+    for field in ('rgb_history_seconds', 'rgb_history_hz', 'direct_sim_seconds', 'direct_wall_seconds'):
+        value = getattr(args, field, None)
+        if field.startswith('rgb_history_') and not getattr(args, 'rgb_history_seconds', 0):
+            continue
+        if value is not None:
+            command.extend(['--' + field.replace('_', '-'), str(value)])
     connect_host = '127.0.0.1' if args.host == '0.0.0.0' else args.host
     return LaunchPlan(tuple(command), f'http://{connect_host}:{port}',
                       {'integration': 'robodojo', 'episode_id': run_id, 'task': task,

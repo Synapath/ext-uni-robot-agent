@@ -66,10 +66,14 @@ class Adapter:
 
     def __init__(self, env, output, layout, layout_sha256, *, episode_id="episode", slot=0,
                  ik_joint_delta_guard=True, depth_enabled=True, calibration_enabled=True,
-                 native_call=native_call, solver_factory=None):
+                 native_call=native_call, solver_factory=None, rgb_history_seconds=0.0,
+                 rgb_history_hz=5.0, direct_sim_seconds=None, direct_wall_seconds=None):
         if depth_enabled and not calibration_enabled:
             raise ValueError("Disabling camera calibration requires depth_enabled=False")
         self._native_call, self._solver_factory = native_call, solver_factory
+        from uni_robot_agent.services.environment.history import RGBHistory
+        self.rgb_history = (RGBHistory(episode_id=episode_id, window_s=rgb_history_seconds,
+                                      sample_hz=rgb_history_hz) if rgb_history_seconds else None)
         self.env, self.slot = env, slot
         self.output, self.layout = Path(output), Path(layout)
         if hashlib.sha256(self.layout.read_bytes()).hexdigest() != layout_sha256:
@@ -106,6 +110,12 @@ class Adapter:
                       "workspace_bounds": [[-1., -.8, .5], [1., .8, 1.3]]},
         )
         self.fk = None
+        if self.rgb_history is not None:
+            self.description.metadata["rgb_history"] = {"window_seconds": rgb_history_seconds,
+                "sample_hz": rgb_history_hz, "max_groups": self.rgb_history.max_groups}
+        if direct_sim_seconds is not None or direct_wall_seconds is not None:
+            self.description.metadata["direct_control"] = {"max_sim_seconds": direct_sim_seconds,
+                                                            "wall_seconds": direct_wall_seconds}
         self.gripper_commands: dict[str, float] = {}
         self.ik_solvers = {}
 
@@ -227,6 +237,7 @@ class Adapter:
         return EnvironmentState(
             arms=arms, state_version=self.steps, native_steps=self.steps, ended=self.ended,
             metadata={"instruction": raw["instruction"],
+                      **({"simulation_time_s": self.steps / 25} if self.rgb_history else {}),
                       "remaining_steps": max(0, int(self.env.step_lim) - self.steps)},
         )
 
@@ -277,7 +288,18 @@ class Adapter:
         # Commit only after native execution: queued and rejected requests have no effect.
         # Native slew limiting reports an intermediate target, not the intent to retain.
         self.gripper_commands = {name: float(command["gripper"]) for name, command in commands.items()}
-        self.env.get_obs_batch(env_idx_list=[self.slot], last_frame=True)
+        raw = self.env.get_obs_batch(env_idx_list=[self.slot], last_frame=True)[0]
+        self._record_rgb_history(raw)
+
+    def _record_rgb_history(self, raw):
+        if self.rgb_history is None:
+            return
+        cameras = {}
+        for name, aliases in CAMERA_ALIASES.items():
+            source = next(alias for alias in aliases if alias in raw["vision"])
+            cameras[name] = CameraFrame(np.asarray(raw["vision"][source]["color"], dtype=np.uint8)[..., :3])
+        self.rgb_history.record(simulation_time_s=self.steps / 25, state_version=self.steps,
+                                captured_at=time.time(), cameras=cameras)
 
     def _recovery(self, arm):
         from .ik.recovery import Recovery
@@ -375,6 +397,9 @@ class Adapter:
         if not self.started:
             raise RequestRejected("Native episode has not started")
         selected = list(CAMERA_ALIASES) if cameras is None else cameras
+        if self.rgb_history is not None:
+            raw_history = self.env.get_obs_batch(env_idx_list=[self.slot], last_frame=True)[0]
+            self._record_rgb_history(raw_history)
         if not selected or len(set(selected)) != len(selected) or not set(selected) <= CAMERA_ALIASES.keys():
             raise RequestRejected("cameras must name distinct supported views")
         if high_resolution:
@@ -402,6 +427,7 @@ class Adapter:
         return CapturedObservation(
             self.episode_id, state.state_version, time.time(), state.model_dump(mode="json"), frames,
             terminated=bool(self.ended and not truncated), truncated=bool(truncated),
+            history={} if self.rgb_history is None else self.rgb_history.sample(selected),
         ).freeze()
 
     def outcome(self):

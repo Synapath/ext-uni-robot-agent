@@ -102,6 +102,9 @@ recovery to the operator. Keep native stop evidence in `diagnostics` for people.
 
 ## RoboDojo
 
+Opt-in temporal RGB and simulation/wall motion budgets are documented in
+[Temporal RGB and bounded Direct motion](direct-temporal.md).
+
 `--integration robodojo` adds the RoboDojo prompt and optional task-requirements
 loader to the shared prepared-episode lifecycle. `--task` and `--run-id` identify
 the expected episode. `--include-extra-task-requirements` loads the repository's

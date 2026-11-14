@@ -53,6 +53,13 @@ class Observation:
         for parts, image in self.images:
             parts[:] = [part for part in parts if part is not image]
         metadata = self.metadata
+        temporal = metadata.get("temporal_rgb")
+        if isinstance(temporal, dict) and temporal.get("version") == 1:
+            for parts, _ in self.images:
+                parts[:] = [part for part in parts if not (isinstance(part, dict)
+                    and str(part.get("text", "")).startswith("[RUA RGB frame "))]
+            temporal.update(original_frame_count=temporal.get("frame_count", 0), frames=[],
+                            frame_count=0, images_omitted=True)
         names = list(metadata.get("image_cameras") or metadata.get("observed_cameras", []))
         camera_key = "cameras" if "observation" in self.payload else "camera_calibration"
         cameras = metadata.get(camera_key, {})

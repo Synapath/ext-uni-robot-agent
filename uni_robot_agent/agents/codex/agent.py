@@ -416,6 +416,10 @@ def _consume_main_turn(
         )
 
         if method == "turn/completed":
+            terminal_error = _get(_get(payload, "turn"), "error")
+            if terminal_error is not None and not state.get("stop_reason"):
+                state["error"] = str(_get(terminal_error, "message", terminal_error))
+                state["stop_reason"] = "sdk_error"
             state["completed"] = True
             if state["pending_reasoning"]:
                 logger.warning(

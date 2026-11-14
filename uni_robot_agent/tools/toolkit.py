@@ -32,6 +32,7 @@ class ImageAttachment:
     data: bytes = field(repr=False)
     mime_type: str = "image/png"
     name: str | None = None
+    label: str | None = None
 
 
 @dataclass(frozen=True)

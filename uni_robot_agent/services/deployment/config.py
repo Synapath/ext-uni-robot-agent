@@ -84,6 +84,10 @@ def positive(value):
 
 def validate_deployment(args):
     service = getattr(args, 'service', None) or 'env'
+    direct_settings = (getattr(args,'rgb_history_seconds',0) or getattr(args,'direct_sim_seconds',None)
+                       or getattr(args,'direct_wall_seconds',None) or getattr(args,'rua_source_root',None))
+    if direct_settings and (service != 'env' or getattr(args,'integration',None) != 'robodojo'):
+        raise ValueError('Temporal RGB and Direct deployment options require a RoboDojo environment')
     if service != 'env' and getattr(args, 'integration', None):
         raise ValueError('--integration only applies to environment services')
     if args.command == 'setup':
@@ -145,6 +149,12 @@ def add_launch_arguments(parser, *, managed=False):
     parser.add_argument('--depth', action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument('--camera-calibration', action=argparse.BooleanOptionalAction, default=None,
                         help='RoboDojo environment deployment only; disabling requires --no-depth')
+    parser.add_argument('--rgb-history-seconds', type=float, default=0.0)
+    parser.add_argument('--rgb-history-hz', type=float, default=5.0)
+    parser.add_argument('--direct-sim-seconds', type=float)
+    parser.add_argument('--direct-wall-seconds', type=float)
+    parser.add_argument('--rua-source-root', type=Path,
+                        help='Explicit pinned source overlay for a RoboDojo development runtime')
 
 
 def environment_options(values):
@@ -212,3 +222,8 @@ class DeploymentConfig(RuntimeConfig):
     cameras: list[str] | None = None
     depth: bool | None = None
     camera_calibration: bool | None = None
+    rgb_history_seconds: float = Field(default=0.0, ge=0, le=2, allow_inf_nan=False)
+    rgb_history_hz: float = Field(default=5.0, gt=0, le=25, allow_inf_nan=False)
+    direct_sim_seconds: float | None = Field(default=None, gt=0, le=1, allow_inf_nan=False)
+    direct_wall_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    rua_source_root: Path | None = None

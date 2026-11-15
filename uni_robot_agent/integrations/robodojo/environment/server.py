@@ -86,7 +86,9 @@ def _serve(adapter, args, app, *, integration="robodojo"):
     owner = _OwnerThreadBackend(adapter)
     info = EpisodeInfo(episode_id=args.run_id, task=args.task, environment=owner.description,
                        integration=integration, capabilities=["motion", "capture", "joint_prefix", "preview"],
-                       metadata={"task_id": args.task, "seed": 0, "layout": str(args.layout),
+                       metadata={"task_id": args.task, "seed": args.seed,
+                                 "native_reset_seed": adapter.env.get_env_seed(adapter.slot),
+                                 "layout": str(args.layout),
                                  "layout_sha256": args.layout_sha256,
                                  "instruction": adapter.read_state().metadata["instruction"],
                                  "skill_namespace": "robodojo"})
@@ -139,6 +141,8 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
     parser.add_argument("--layout-sha256", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--seed", type=int, default=0,
+                        help="Native reset/RNG seed; independent of the frozen --layout")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18760)
     parser.add_argument("--ik-joint-delta-guard", action=argparse.BooleanOptionalAction, default=True,
@@ -152,6 +156,10 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
     parser.add_argument("--direct-sim-seconds", type=float)
     parser.add_argument("--direct-wall-seconds", type=float)
     args = parser.parse_args(argv)
+    try:
+        native_compat.validate_seed(args.seed)
+    except ValueError as error:
+        parser.error(str(error))
     import math
     if not math.isfinite(args.rgb_history_seconds) or not 0 <= args.rgb_history_seconds <= 2:
         parser.error("--rgb-history-seconds must be finite and between 0 and 2")
@@ -195,12 +203,13 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
         from src.eval_client.physx_warning_monitor import get_monitor
 
         get_monitor().start(enabled=True)
-        native = runtime.create_native(args.task, app, args.output_dir, root=native_root)
+        native = runtime.create_native(args.task, app, args.output_dir, root=native_root, seed=args.seed)
         adapter = runtime.create_adapter(native, args.output_dir, args.layout, args.layout_sha256,
                           episode_id=args.run_id, ik_joint_delta_guard=args.ik_joint_delta_guard, depth_enabled=not args.no_depth,
                           calibration_enabled=not args.no_camera_calibration,
                           rgb_history_seconds=args.rgb_history_seconds, rgb_history_hz=args.rgb_history_hz,
-                          direct_sim_seconds=args.direct_sim_seconds, direct_wall_seconds=args.direct_wall_seconds)
+                          direct_sim_seconds=args.direct_sim_seconds, direct_wall_seconds=args.direct_wall_seconds,
+                          seed=args.seed)
         _serve(adapter, args, app, integration=integration)
     except BaseException:
         (args.output_dir / "server_error.txt").write_text(traceback.format_exc())

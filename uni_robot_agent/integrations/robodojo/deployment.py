@@ -11,8 +11,8 @@ def recipe(args):
 
 
 def validate(args):
-    if getattr(args, 'seed', None) not in (None, 0):
-        raise ValueError('Official RoboDojo currently supports seed 0 with an explicit frozen layout')
+    from .environment.native_compat import validate_seed
+    validate_seed(0 if getattr(args, 'seed', None) is None else args.seed)
     if args.command != 'setup' and not args.task:
         raise ValueError('Local RoboDojo deployment requires --task')
     if getattr(args, 'camera_calibration', None) is False and getattr(args, 'depth', None) is not False:
@@ -125,6 +125,8 @@ def plan(args, runtime, output, run_id):
     command = [runtime.python, '-m', 'uni_robot_agent.integrations.robodojo.environment.server',
         '--native-root', str(native), '--task', task, '--layout', str(layout), '--layout-sha256', digest,
         '--output-dir', str(output / 'environment'), '--run-id', run_id, '--host', args.host, '--port', str(port)]
+    seed = 0 if getattr(args, 'seed', None) is None else args.seed
+    command.extend(['--seed', str(seed)])
     if getattr(args, 'rua_source_root', None):
         source = args.rua_source_root.resolve(strict=True)
         if not (source / 'uni_robot_agent/__init__.py').is_file():
@@ -145,4 +147,5 @@ def plan(args, runtime, output, run_id):
     connect_host = '127.0.0.1' if args.host == '0.0.0.0' else args.host
     return LaunchPlan(tuple(command), f'http://{connect_host}:{port}',
                       {'integration': 'robodojo', 'episode_id': run_id, 'task': task,
-                       'environment.metadata.layout_sha256': digest}, runtime.environment, output)
+                       'environment.metadata.layout_sha256': digest,
+                       'metadata.seed': seed}, runtime.environment, output)

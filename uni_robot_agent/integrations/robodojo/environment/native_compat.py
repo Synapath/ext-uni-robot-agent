@@ -25,13 +25,29 @@ class NoPolicy:
         pass
 
 
-def create_native(task, app, output, *, root):
+def validate_seed(seed):
+    if type(seed) is not int or not 0 <= seed < 2**32:
+        raise ValueError('RoboDojo environment seed must be an integer in [0, 2**32)')
+    return seed
+
+
+def reset_episode(env, layout, *, seed=0, slot=0):
+    """Keep the frozen layout independent of the native reset/RNG seed."""
+    validate_seed(seed)
+    env.seed_manager.seed_info = {seed: {"scene_layout": str(layout)}}
+    env.reset(seed=[seed])
+    if env.get_env_seed(slot) != seed or env.env_seeds[slot] != seed:
+        raise RuntimeError('Native RoboDojo reset seed differs from the requested seed')
+
+
+def create_native(task, app, output, *, root, seed=0):
     import yaml
     from omegaconf import OmegaConf
     from src.eval_client import eval_env
     from utils.pipeline_utils import process_config, process_randomization
 
     root = Path(root)
+    validate_seed(seed)
 
     def load(path):
         return yaml.safe_load(path.read_text())
@@ -62,7 +78,9 @@ def create_native(task, app, output, *, root):
     cfg = process_randomization(cfg)
     cfg, _ = process_config(cfg, task_name=task)
     cfg.sim.scene.num_envs = 1
-    cfg.sim.seed = [0]
+    # eval_cfg.seed selects the asset layout directory and remains zero. The
+    # simulator RNG seed is independent; Adapter supplies the exact layout.
+    cfg.sim.seed = [seed]
     cfg.camera.default_frequency = 25
     cfg.eval_cfg.observation.collect_freq = 25
     original = eval_env.WsModelClient

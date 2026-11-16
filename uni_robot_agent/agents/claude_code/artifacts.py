@@ -8,7 +8,8 @@ from uni_robot_agent.provider.recording.exchanges import get_model_exchange_erro
 def finalize_model_records(gateway, result, session_dir, event_bus):
     records = gateway.trace_records
     result.provider_error = get_model_exchange_error(
-        records, interrupted=result.stop_reason in {"max_turns", "wall_time_limit", "cancelled"},
+        records, interrupted=result.stop_reason in {"max_turns", "wall_time_limit", "cancelled", "environment_terminal",
+                                                  "request_limit", "episode_budget_limit", "batch_budget_limit"},
     )
     if result.provider_error:
         result.error = result.error or result.provider_error

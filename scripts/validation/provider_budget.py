@@ -1,6 +1,6 @@
 """Provider ownership, billing ambiguity and native Messages regressions; CPU only."""
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 import tempfile
@@ -129,6 +129,8 @@ class ProviderBudgetChecks(unittest.TestCase):
 
     def test_messages_direct_allowlist_and_native_signed_history(self):
         self.assertNotEqual(DirectFableLimits().digest, FableLimits().digest)
+        self.assertEqual(DirectFableLimits(**asdict(DirectFableLimits())), DirectFableLimits())
+        with self.assertRaises(ValueError):DirectFableLimits(control_mode='hybrid')
         thinking={'type':'thinking','thinking':'opaque fixture','signature':'fixture-signature'}
         body={'model':'claude-fable-5-2','thinking':{'type':'adaptive'},'output_config':{'effort':'high'},
             'messages':[{'role':'assistant','content':[thinking,{'type':'tool_use','id':'t1','name':'mcp__uni_robot_agent__move','input':{}}]},

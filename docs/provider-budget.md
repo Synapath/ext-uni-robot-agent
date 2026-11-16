@@ -42,6 +42,14 @@ The result is `(service, endpoint)`. Give that endpoint/token to the worker RUA
 runtime with worker provider retries disabled. `service.cancel()` interrupts
 sockets/backoff; `service.shutdown()` cancels and drains ASGI workers. Close SQLite
 only after shutdown completes, never under an active exchange.
+For supervised setup, `ledger.claim(id, defer_clock=True)` reserves the single
+episode identity without starting its wall clock. Count/generation admission
+fails with `episode_clock_not_started` until its trusted owner calls
+`ledger.start_clock(id)` after readiness. Activation is atomic and one-shot;
+repeated activation, closed episodes or unknown identities cannot reset time or
+clear requests/reservations. Ordinary `claim(id)` retains its immediate-clock
+behavior. The supervisor must separately bound setup and cleanup, and must not
+reuse a wall deadline accumulated during offline debugging.
 `ProviderConnection` provides direct count/probe access through the same client;
 its caller owns admission. Injecting `gate.forward` is for offline fixtures only.
 

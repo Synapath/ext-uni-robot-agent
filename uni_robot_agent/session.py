@@ -419,10 +419,10 @@ class Session:
             raise RuntimeError("Session is closed")
         self._subscriptions.add(callback)
 
-    def cancel(self) -> None:
+    def cancel(self, reason: str = "interrupted") -> None:
         """Request planner cancellation; this is not a physical emergency stop."""
         if self._agent is not None and not self._closed:
-            self._agent.cancel("interrupted")
+            self._agent.cancel(reason)
 
     def finish(self, *, error: str | None = None) -> RunResult | None:
         """Drain work, finalize once, persist and close owned connections."""

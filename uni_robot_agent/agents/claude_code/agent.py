@@ -34,6 +34,7 @@ class ClaudeCodeAgent(ClaudeConfig):
         self._cli_path, self._native_tools = cli_path, native_tools
         self._deadline = None if timeout_s is None else time.monotonic() + timeout_s
         self._loop = self._task = None
+        self._cancel_scope = None
         self._cancel_reason = None
         self._cleanup_error = None
         self._binding = ClaudeModelBinding()
@@ -50,12 +51,14 @@ class ClaudeCodeAgent(ClaudeConfig):
             result.train_error = "Claude native model records require --provider-url"
 
     def cancel(self, reason):
+        if self._cancel_reason is not None:
+            return
         if self._code_policy is not None:
             self._code_policy.revoke()
         self._cancel_reason = reason
         self._binding.cancel()
-        if self._loop is not None and self._task is not None and not self._task.done():
-            self._loop.call_soon_threadsafe(self._task.cancel)
+        if self._loop is not None and self._cancel_scope is not None:
+            self._loop.call_soon_threadsafe(self._cancel_scope.cancel)
 
     def close(self):
         if self._cleanup_error:
@@ -72,9 +75,11 @@ class ClaudeCodeAgent(ClaudeConfig):
                                                event_bus, session_dir, model_endpoint, code_policy))
         finally:
             self._loop = self._task = None
+            self._cancel_scope = None
 
     async def _run_async(self, prompt, task, executor, max_turns, bus, session_dir, model_endpoint, code_policy=None):
         import claude_agent_sdk as sdk
+        import anyio
         self._loop, self._task = asyncio.get_running_loop(), asyncio.current_task()
         self._cancel_reason = None
         tools = ClaudeTools(executor, self._binding, timeout_s=(
@@ -84,7 +89,7 @@ class ClaudeCodeAgent(ClaudeConfig):
         started = time.monotonic()
         cleanup_error = None
         remaining = None if self._deadline is None else max(0, self._deadline - started)
-        deadline = asyncio.timeout(remaining)
+        deadline = None
         try:
             env = {
                 "CLAUDE_CODE_USE_BEDROCK": "0", "CLAUDE_CODE_USE_VERTEX": "0",
@@ -141,14 +146,21 @@ class ClaudeCodeAgent(ClaudeConfig):
             if bus:
                 bus.emit(AgentRunStarted(instruction=task, model=self._model,
                                         agent_backend="claude_code", tool_event_source="execution"))
-            async with deadline:
+            # The SDK shields subprocess cleanup with AnyIO. Raw task.cancel()
+            # or asyncio.timeout() bypasses that shield and can orphan its CLI.
+            with anyio.move_on_after(remaining) as deadline:
+                self._cancel_scope = deadline
+                if self._cancel_reason is not None:
+                    deadline.cancel()
                 async with aclosing(sdk.query(prompt=_initial_input(prompt), options=options)) as messages:
                     async for message in messages:
                         state.consume(message)
+            if deadline.cancel_called:
+                state.stop_reason = self._cancel_reason or "wall_time_limit"
         except asyncio.CancelledError:
             state.stop_reason = self._cancel_reason or "cancelled"
         except TimeoutError as error:
-            if deadline.expired():
+            if deadline is not None and deadline.cancel_called:
                 state.stop_reason = "wall_time_limit"
             else:
                 state.error = f"TimeoutError: {error}"

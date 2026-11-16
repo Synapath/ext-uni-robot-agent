@@ -95,15 +95,36 @@ class Ledger:
             self.db.execute("ROLLBACK")
             raise
 
-    def claim(self, episode: str):
+    def claim(self, episode: str, *, defer_clock: bool = False):
         with self.lock:
             self.db.execute("BEGIN IMMEDIATE")
             try:
                 # This prepared authorization permits exactly one episode total.
                 if self.db.execute("SELECT COUNT(*) FROM episode").fetchone()[0]:
                     raise Stop("single_episode_already_claimed")
-                self.db.execute("INSERT INTO episode VALUES (?, ?, NULL)", (episode, self.clock()))
+                self.db.execute("INSERT INTO episode VALUES (?, ?, NULL)",
+                                (episode, None if defer_clock else self.clock()))
                 self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+
+    def start_clock(self, episode: str) -> float:
+        """Arm a deferred episode once, after its owner has completed setup."""
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self.db.execute("SELECT started, stopped FROM episode WHERE id=?", (episode,)).fetchone()
+                if row is None:
+                    raise Stop("episode_not_claimed")
+                if row[1]:
+                    raise Stop(row[1])
+                if row[0] is not None:
+                    raise Stop("episode_clock_already_started")
+                started = self.clock()
+                self.db.execute("UPDATE episode SET started=? WHERE id=?", (started, episode))
+                self.db.execute("COMMIT")
+                return started
             except BaseException:
                 self.db.execute("ROLLBACK")
                 raise
@@ -118,6 +139,8 @@ class Ledger:
             raise Stop("episode_not_claimed")
         if row[1]:
             raise Stop(row[1])
+        if row[0] is None:
+            raise Stop("episode_clock_not_started")
         if self.clock() - row[0] >= self.limits.wall_seconds:
             raise Stop("wall_time_limit")
 

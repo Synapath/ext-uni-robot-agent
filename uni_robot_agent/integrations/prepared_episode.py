@@ -207,6 +207,13 @@ class PreparedEpisodeSession:
     def task_succeeded(self):
         return self.episode.task_success
 
+    def terminal_reason(self):
+        """A confirmed native end stops planning; uncertain ACKs do not."""
+        episode = self.episode
+        if episode is not None and not episode.env.uncertain and episode.state.ended:
+            return "environment_terminal"
+        return None
+
     def finalize(self, *, agent_result, error):
         if self.result is None:
             episode = self.episode

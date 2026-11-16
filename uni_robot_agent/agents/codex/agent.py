@@ -289,6 +289,8 @@ class CodexAgent(CodexConfig):
             message = "\n".join(texts)
         elif error:
             message = ""
+        elif state.get("stop_reason"):
+            message = "Planner stopped: " + state["stop_reason"]
         else:
             message = (
                 "Codex session ended without output (no agent messages or tool calls)"
@@ -380,7 +382,8 @@ class CodexAgent(CodexConfig):
                     )
         except Exception as e:
             # Interrupting an SDK stream can raise while unwinding the expected stop.
-            if state.get("stop_reason") in {"max_turns", "wall_time_limit"}:
+            if state.get("stop_reason") in {"max_turns", "wall_time_limit", "environment_terminal",
+                                            "request_limit", "episode_budget_limit", "batch_budget_limit"}:
                 return
             import traceback
 

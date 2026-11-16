@@ -84,6 +84,8 @@ class ProviderGateway:
         retry_policy=None,
         request_guard=None,
         attempt_recorder=None,
+        generation_guard=None,
+        on_local_stop=None,
         event_bus=None,
         tracer=None,
     ) -> None:
@@ -128,6 +130,8 @@ class ProviderGateway:
         self._preserve_generation_controls = preserve_generation_controls
         self._model_binding = model_binding
         self._event_bus = event_bus
+        self._generation_guard = generation_guard
+        self._on_local_stop = on_local_stop
         self._server: HttpServer | None = None
 
     @property
@@ -291,6 +295,19 @@ class ProviderGateway:
                     profile=self._adapter.profile_name,
                 )
                 exchange["request"] = encoded.training_body
+                stop_reason = self._generation_guard() if self._generation_guard else None
+                if stop_reason:
+                    # Preserve the final acknowledged tool result for records, but
+                    # do not count, reserve, upload or generate after native end.
+                    exchange["local_stop_reason"] = stop_reason
+                    exchange["status"] = 409
+                    self._trace.prepared(exchange)
+                    return _GatewayResponse(
+                        self, request, exchange, None, status=409,
+                        headers={"Content-Type": "application/json"},
+                        body=_encode_json({"error": {"code": "rua_lifecycle_stop",
+                            "type": "local_lifecycle", "message": stop_reason}}), complete=False,
+                    )
                 try:
                     self._client.prepare_wire(provider_request, headers, exchange)
                 finally:
@@ -310,6 +327,10 @@ class ProviderGateway:
             if exchange is not None:
                 exchange["status"] = status
                 exchange["response_headers"] = dict(response_headers.items())
+                admission_reason = response_headers.get("x-rua-admission-stop")
+                if (urlsplit(self._upstream_base_url).hostname in {"127.0.0.1", "localhost", "::1"}
+                        and admission_reason in {"request_limit", "episode_budget_limit", "batch_budget_limit", "wall_time_limit"}):
+                    exchange["admission_stop_reason"] = admission_reason
 
             failure = (
                 exchange.get("response_error") if exchange is not None else None
@@ -363,6 +384,21 @@ class ProviderGateway:
                 complete=not failure,
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary records the failed exchange.
+            if self._admission is not None:
+                from uni_robot_agent.provider.budget.core import Stop
+                if isinstance(exc, Stop):
+                    reason = str(exc)
+                    self._admission.ledger.stop(self._admission.episode, reason)
+                    self._admission.stopped.set()
+                    if exchange is not None:
+                        exchange["admission_stop_reason"] = reason
+                        exchange["status"] = 429
+                    return _GatewayResponse(
+                        self, request, exchange, reply, status=429,
+                        headers={"Content-Type": "application/json", "x-rua-admission-stop": reason},
+                        body=_encode_json({"error": {"code": "rua_admission_stop",
+                            "type": "local_admission", "message": reason}}), complete=False,
+                    )
             if self._admission is not None:
                 self._admission.ledger.stop(self._admission.episode, 'provider_exchange_failed')
                 self._admission.stopped.set()
@@ -466,6 +502,9 @@ class _GatewayResponse(Response):
         if self.exchange is not None:
             self.exchange["delivered"] = True
             self.exchange["complete"] = self.complete
+            reason = self.exchange.get("local_stop_reason") or self.exchange.get("admission_stop_reason")
+            if reason and self.gateway._on_local_stop:
+                self.gateway._on_local_stop(reason)
         if self.reply is not None and self.gateway._model_binding:
             if self.complete:
                 self.gateway._model_binding.response_written(self.reply)

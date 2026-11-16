@@ -121,6 +121,14 @@ class Ledger:
         if self.clock() - row[0] >= self.limits.wall_seconds:
             raise Stop("wall_time_limit")
 
+    def check_generation(self, episode: str):
+        """Reject a used-up generation allowance before even counting input."""
+        with self.lock:
+            self.check(episode)
+            count = self.db.execute("SELECT COUNT(*) FROM call WHERE episode=?", (episode,)).fetchone()[0]
+            if count >= self.limits.max_requests:
+                raise Stop("request_limit")
+
     def reserve(self, episode: str, inputs: int, outputs: int, *, fingerprint: str | None = None):
         integer(inputs, "input_tokens")
         integer(outputs, "output_tokens")
@@ -291,7 +299,7 @@ class BudgetGate:
         with self.lock:
             self._exchange = exchange
             try:
-                self.ledger.check(self.episode)
+                self.ledger.check_generation(self.episode)
                 prepared, count_body = self.prepare(body)
                 status, _, raw = self.forward_request(self.count_path, count_body, headers or {})
                 if status != 200:

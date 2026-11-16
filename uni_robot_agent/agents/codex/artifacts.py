@@ -199,7 +199,11 @@ def _parse_exchanges(
         response_items: list[dict[str, Any]] = []
         failure: str | None = None
         failure_cause: Exception | None = None
-        if not exchange.get("complete") or exchange.get("status") != 200:
+        if exchange.get("local_stop_reason") == "environment_terminal":
+            # The local-only final context contains the last tool ACK. There is
+            # no vendor response to invent and no unresolved physical command.
+            pass
+        elif not exchange.get("complete") or exchange.get("status") != 200:
             failure = exchange_failure_detail(exchange, index)
         else:
             try:
@@ -753,7 +757,8 @@ def finalize_model_records(gateway, result, session_dir, event_bus) -> None:
     ]
     result.provider_error = get_model_exchange_error(
         main_records,
-        interrupted=result.stop_reason in {"max_turns", "wall_time_limit"},
+        interrupted=result.stop_reason in {"max_turns", "wall_time_limit", "environment_terminal",
+                                          "request_limit", "episode_budget_limit", "batch_budget_limit"},
     )
     if result.provider_error:
         if event_bus is not None:

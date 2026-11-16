@@ -162,6 +162,9 @@ def assemble_session(args) -> SessionAssembly:
 
         # The callback is internal bookkeeping; finish returns only a submission receipt.
         toolkit.set_solved_fn(session.task_succeeded)
+        terminal = getattr(session, "terminal_reason", None)
+        if terminal is not None:
+            toolkit.set_terminal_fn(terminal)
         description = getattr(session.episode, "description", None)
         prompt_integration = getattr(description, "integration", args.integration)
         prompt_builder = get_prompt_builder(prompt_integration)
@@ -576,7 +579,9 @@ def _finalize_run(assembly, subscriptions, args, result, error_msg, started, *, 
         )
 
     provider_error = getattr(result, "provider_error", None)
-    if provider_error and lifecycle_outcome is None:
+    native_terminal = (outcome.metadata.get("complete") is True
+                       and isinstance(outcome.success, bool))
+    if provider_error and lifecycle_outcome is None and not native_terminal:
         # Mark provider failures as infrastructure errors; the integration retry policy applies below.
         outcome = EpisodeOutcome(
             success=None,
@@ -585,6 +590,9 @@ def _finalize_run(assembly, subscriptions, args, result, error_msg, started, *, 
             failure_category="provider_transport",
             metadata=outcome.metadata,
         )
+    elif provider_error:
+        outcome = replace(outcome, metadata={**outcome.metadata,
+                                             "provider_error": provider_error})
     # Physical episodes must not be replayed by provider/lifecycle overrides.
     if not assembly.allow_automatic_retry and outcome.retryable:
         outcome = replace(outcome, retryable=False)
@@ -764,7 +772,7 @@ def _result_exit_code(*, outcome, task_success, agent_result, error_msg) -> int:
     if task_success is None:
         ok = not error_msg and (agent_result is None or agent_result.success)
     else:
-        ok = task_success and not error_msg
+        ok = task_success and not error_msg and not getattr(agent_result, "error", None)
     return 0 if ok else 1
 
 
@@ -805,6 +813,8 @@ def _run_agent(
             tracer=tracer,
             model_binding=model_runtime.binding,
             event_bus=event_bus,
+            generation_guard=getattr(request.get("toolkit"), "terminal_reason", None),
+            on_local_stop=agent.cancel,
             **context_config,
         )
     result = None

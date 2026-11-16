@@ -314,6 +314,8 @@ def _record(
         "provider_complete": bool(exchange.get("provider_complete")),
         "delivered": bool(exchange.get("delivered")),
         "complete": bool(exchange.get("complete")),
+        "local_stop_reason": exchange.get("local_stop_reason"),
+        "admission_stop_reason": exchange.get("admission_stop_reason"),
         "client_disconnected": bool(exchange.get("client_disconnected")),
         "delivery_error": exchange.get("delivery_error"),
         "response_headers": exchange.get("response_headers") or {},
@@ -391,6 +393,11 @@ def get_model_exchange_error(
 ) -> str | None:
     """Summarize provider failures; retain full details in the trace directory."""
     exchanges = list(exchanges)
+    if interrupted and exchanges and exchanges[-1].get("local_stop_reason") == "environment_terminal":
+        exchanges.pop()
+    if interrupted and exchanges and exchanges[-1].get("admission_stop_reason") in {
+            "request_limit", "episode_budget_limit", "batch_budget_limit", "wall_time_limit"}:
+        exchanges.pop()
     if interrupted and exchanges:
         tail = exchanges[-1]
         # A budget cut can leave a request pending or disconnect a valid response.

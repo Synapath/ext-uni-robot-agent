@@ -28,6 +28,11 @@
 
 ## What's New
 
+**Piper-X** is now available on `main`: dual-arm CAN control and RealSense RGB-D
+observations using the existing Direct tools, plus an observation-only `readonly`
+profile. See the [integration guide](uni_robot_agent/integrations/piper_x/README.md)
+for installation, calibration and deployment.
+
 **Hybrid** now supports humanoids, wheeled robots and quadrupeds through reusable actor backends and integration-owned bindings. New integrations include R1Pro, G1 and Go2. [Learn more](docs/hybrid.md).
 
 **Clean mode** offers a small four-tool baseline (`move`, `hold`, `capture_scene`, `finish`) for studying robot-use agents with either RGB plus camera intrinsics/extrinsics or RGB-only observations ([`--tool-profile clean`](docs/integrations.md#clean-robot-tools)).
@@ -160,7 +165,13 @@ for remote-host access and other options.
 | Platform | Public release status |
 |---|---|
 | **ARX ONE** | Available: dual ARX X5 arms and three RealSense D405 cameras behind a device process ([integration](uni_robot_agent/integrations/arx_one/README.md), [deployment](uni_robot_agent/integrations/arx_one/DEPLOYMENT.md)) |
+| **Piper-X** | Available on `main`: dual CAN arms and RealSense RGB-D cameras with Direct tools and an observation-only profile ([integration and deployment](uni_robot_agent/integrations/piper_x/README.md)) |
 | **Franka** | Coming soon |
+
+Piper-X requires a source installation, separately prepared native services and
+installation-specific hardware configuration and calibration. It is not included
+in v0.2.0; see the [integration guide](uni_robot_agent/integrations/piper_x/README.md)
+for setup and validation limits.
 
 The ARX ONE integration is also a template for connecting another real robot: its Body
 framework and host tooling are robot-independent, and each device kind plugs in as a driver

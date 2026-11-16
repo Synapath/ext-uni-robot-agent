@@ -132,5 +132,3 @@ def select_frames(source, *, current_step, max_groups=3, window_s=2):
                    if max_groups == 2 else [0, len(versions)//2, len(versions)-1])
         versions = [versions[i] for i in indices]
     return [f for v in versions for f in by_group[v]]
-
-

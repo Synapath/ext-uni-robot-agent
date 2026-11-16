@@ -8,7 +8,7 @@ from uni_robot_agent.context.observation_history import estimate_context, observ
 @register_context_policy("observation_window")
 class ObservationWindowPolicy:
     name = "observation_window"
-    version = "2"
+    version = "3"
 
     def __init__(self, *, observation_horizon=2, keep_recent_blocks=4,
                  max_estimated_input_tokens=None, image_token_allowance=1536):
@@ -45,8 +45,11 @@ class ObservationWindowPolicy:
         protected = set(groups[:self.horizon]) | {view.key for view in views if view.pinned}
         recent = set(groups[:self.recent])
         evicted = []
+        latest = {view.key: view for view in views}
         for view in views:
-            if view.key not in protected:
+            duplicate_clip = (view.payload.get("temporal_rgb", {}).get("version") == 1
+                              and latest[view.key] is not view and not view.pinned)
+            if view.key not in protected or duplicate_clip:
                 view.evict(compact_metadata=view.key not in recent)
                 evicted.append(view.call_id)
         effective = request.with_items(items) if evicted else request

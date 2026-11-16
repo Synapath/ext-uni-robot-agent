@@ -147,7 +147,19 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
                         help="Capture calibrated RGB only; never acquire depth images")
     parser.add_argument("--no-camera-calibration", action="store_true",
                         help="With --no-depth, capture RGB without camera intrinsics or extrinsics")
+    parser.add_argument("--rgb-history-seconds", type=float, default=0.0)
+    parser.add_argument("--rgb-history-hz", type=float, default=5.0)
+    parser.add_argument("--direct-sim-seconds", type=float)
+    parser.add_argument("--direct-wall-seconds", type=float)
     args = parser.parse_args(argv)
+    import math
+    if not math.isfinite(args.rgb_history_seconds) or not 0 <= args.rgb_history_seconds <= 2:
+        parser.error("--rgb-history-seconds must be finite and between 0 and 2")
+    if not math.isfinite(args.rgb_history_hz) or not 0 < args.rgb_history_hz <= 25:
+        parser.error("--rgb-history-hz must be finite and between 0 and 25")
+    for value in (args.direct_sim_seconds, args.direct_wall_seconds):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            parser.error("Direct motion budgets must be finite and positive")
     if args.no_camera_calibration and not args.no_depth:
         parser.error("--no-camera-calibration requires --no-depth")
     try:
@@ -186,7 +198,9 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
         native = runtime.create_native(args.task, app, args.output_dir, root=native_root)
         adapter = runtime.create_adapter(native, args.output_dir, args.layout, args.layout_sha256,
                           episode_id=args.run_id, ik_joint_delta_guard=args.ik_joint_delta_guard, depth_enabled=not args.no_depth,
-                          calibration_enabled=not args.no_camera_calibration)
+                          calibration_enabled=not args.no_camera_calibration,
+                          rgb_history_seconds=args.rgb_history_seconds, rgb_history_hz=args.rgb_history_hz,
+                          direct_sim_seconds=args.direct_sim_seconds, direct_wall_seconds=args.direct_wall_seconds)
         _serve(adapter, args, app, integration=integration)
     except BaseException:
         (args.output_dir / "server_error.txt").write_text(traceback.format_exc())

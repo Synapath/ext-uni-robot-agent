@@ -6,6 +6,8 @@ import copy
 import io
 import math
 import threading
+from collections import OrderedDict
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -94,6 +96,7 @@ class SnapshotStore:
         self._lock = threading.RLock()
         self._latest: str | None = None
         self._records: list[str] = []
+        self._history_rgb = OrderedDict()
 
     def publish(self, observation: CapturedObservation, *, record: bool = False) -> dict:
         observation = observation.freeze()
@@ -133,12 +136,25 @@ class SnapshotStore:
                     if previous is not None and (sample.simulation_time_s <= previous.simulation_time_s
                                                  or sample.state_version < previous.state_version):
                         raise ValueError("History must follow simulation time and state ordering")
-                    stream = io.BytesIO()
-                    Image.fromarray(sample.frame.rgb).save(stream, format="PNG")
+                    key = (observation.episode_id, name, sample.frame_id, sample.captured_at,
+                           sample.frame.rgb.shape, sample.frame.rgb.dtype.str,
+                           sample.simulation_time_s, hashlib.sha256(sample.frame.rgb.tobytes()).digest())
+                    with self._lock:
+                        ref = self._history_rgb.get(key)
+                    if ref is None:
+                        stream = io.BytesIO()
+                        Image.fromarray(sample.frame.rgb).save(stream, format="PNG")
+                        ref = self.artifacts.put_bytes(stream.getvalue(), "image/png")
+                        self.artifacts.local_path(ref["artifact_id"])
+                        with self._lock:
+                            self._history_rgb[key] = ref
+                            self._history_rgb.move_to_end(key)
+                            while len(self._history_rgb) > 4096:
+                                self._history_rgb.popitem(last=False)
                     entries.append({"frame_id": sample.frame_id, "captured_at": sample.captured_at,
                                     "simulation_time_s": sample.simulation_time_s,
                                     "state_version": sample.state_version,
-                                    "rgb": self.artifacts.put_bytes(stream.getvalue(), "image/png")})
+                                    "rgb": ref})
                     seen.add(sample.frame_id)
                     previous = sample
                 history[name] = entries

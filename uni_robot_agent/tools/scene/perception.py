@@ -17,6 +17,7 @@ from uni_robot_agent.tools.scene.geometry import (
     project_pixels,
 )
 from uni_robot_agent.tools.toolkit import ImageAttachment, ToolOutput
+from uni_robot_agent.tools.scene.temporal import temporal_frames, frame_label
 from uni_robot_agent.tools.scene.triangulation import triangulate
 
 
@@ -25,13 +26,22 @@ def snapshot_images(client, manifest, cameras=None, *, mirror):
     selected = list(available) if cameras is None else cameras
     if not selected or len(set(selected)) != len(selected) or not set(selected) <= set(available):
         raise RequestRejected("Requested cameras must be distinct and available in the recorded snapshot")
+    temporal = temporal_frames(manifest, selected)
+    if temporal:
+        return [ImageAttachment(mirror.store.read_bytes(mirror.mirror_ref(row["rgb"])["artifact_id"]),
+            name=row["camera"], label=frame_label(row)) for row in temporal]
     return [ImageAttachment(mirror.store.read_bytes(mirror.mirror_ref(available[name]["rgb"])["artifact_id"]),
                             mime_type="image/png", name=name) for name in selected]
 
 
 def snapshot_metadata(manifest, cameras, *, mirror):
     """Project only the attached image grids; never substitute live calibration."""
+    cameras = list(dict.fromkeys(cameras))
+    temporal = temporal_frames(manifest, cameras)
     return {
+        **({"temporal_rgb": {"version": 1, "frame_count": len(temporal),
+              "frames": [{key: value for key, value in row.items() if key != "rgb"} for row in temporal]}}
+            if temporal else {}),
         "snapshot_id": manifest["snapshot_id"],
         "image_state_version": manifest["state_version"],
         "observation_path": str(mirror.local_path(manifest["manifest"])),

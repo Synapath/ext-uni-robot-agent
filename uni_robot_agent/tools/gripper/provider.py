@@ -16,7 +16,7 @@ POSE6 = {"type": "array", "items": {"type": "number"}, "minItems": 6, "maxItems"
 OPENING = {"type": "number", "minimum": 0, "maximum": 1, "description": "Normalized opening: 0=closed, 1=open."}
 NAMES = ("move", "grasp", "release", "hold")
 # Motion stops after which the requested action did not finish as planned.
-INCOMPLETE_STOPS = frozenset({"planning_rejected", "unsafe_motion", "tracking_interrupted", "native_end",
+INCOMPLETE_STOPS = frozenset({"planning_rejected", "unsafe_motion", "tracking_interrupted", "native_end", "wall_time_budget",
                               "operator_recovery_required",
                               # A whole path that ran only its verified reachable part.
                               "reachable_prefix"})
@@ -146,12 +146,32 @@ class GripperTools(ToolProvider):
                            profiles=motion_profiles(metadata.get("motion_profiles")),
                            normalized_opening_tolerance=normalized_opening_tolerance(metadata),
                            execution=motion_execution(metadata))
+        limits = metadata.get("direct_control", {})
+        if limits.get("max_sim_seconds") is not None:
+            import math
+            from dataclasses import replace
+            cap = math.floor(limits["max_sim_seconds"] * self.episode.description.environment.control_frequency_hz + 1e-9)
+            if cap < 1:
+                raise RequestRejected("Direct motion budget is shorter than one control period")
+            for spec in specs:
+                field = "max_steps" if spec.name == "move" else "steps"
+                prop = spec.input_schema["properties"][field]
+                prop["maximum"] = min(prop["maximum"], cap)
+                prop["default"] = min(prop["default"], prop["maximum"])
+            specs = [replace(spec, description=spec.description +
+                f" This episode permits at most {limits['max_sim_seconds']:g} second(s) of simulation time per operation. "
+                "A configured wall budget stops cooperatively after an in-flight command is acknowledged; "
+                "wall_time_budget reports partial execution, not target completion. Inspect feedback before continuing.") for spec in specs]
         return bind_tools([spec for spec in specs if spec.name in self.names], provider_id=self.provider_id,
                           handlers={name: getattr(self, name) for name in self.names}, invoke=self.invoke)
 
     def invoke(self, handler, **arguments):
+        import time
+        started = time.monotonic()
         before = self.episode.state.state_version
         output = self.episode.invoke(handler, **arguments)
+        if self.episode.description.environment.metadata.get("direct_control"):
+            output.extra.setdefault("feedback", {})["tool_wall_elapsed_s"] = time.monotonic() - started
         if output.action is None and not output.success:
             # A program that failed after acknowledged steps did move, whatever its error says.
             uncertain = output.extra.get("execution_uncertain") is True
@@ -275,6 +295,8 @@ class GripperTools(ToolProvider):
 
     def _action_cameras(self, arms):
         cameras = self.episode.description.environment.cameras
+        if self.episode.description.environment.metadata.get("rgb_history"):
+            return [camera.name for camera in cameras]
         scene = [camera.name for camera in cameras if camera.role == "scene"]
         wrists = [camera.name for camera in cameras
                   if camera.role == "wrist" and (len(self.episode.description.environment.arms) == 1
@@ -298,5 +320,8 @@ class GripperTools(ToolProvider):
 
     def hold(self, steps=1):
         cameras = [camera.name for camera in self.episode.description.environment.cameras if camera.role == "scene"]
+        if self.episode.description.environment.metadata.get("rgb_history"):
+            cameras = [camera.name for camera in self.episode.description.environment.cameras]
+            return self._run_motion_program(HoldRequest(steps=steps), "hold", cameras=cameras)
         request = HoldRequest(steps=steps)
         return self._run_motion_program(request, "hold", cameras=cameras[:1] or None)

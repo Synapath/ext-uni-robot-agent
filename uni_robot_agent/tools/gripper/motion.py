@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
+from uni_robot_agent.tools.gripper.budget import MotionBudget
 from typing import Any
 
 import numpy as np
@@ -285,6 +286,9 @@ class MotionExecutor:
         return motions, unsafe
 
     def move(self, request: MoveRequest) -> dict:
+        budget = MotionBudget(self.backend.description, request.max_steps)
+        if budget.limits and self.wholepath:
+            raise RequestRejected("Bounded Direct motion requires stepwise execution")
         if self.wholepath:
             return self._move_wholepath(request)
         targets = {target.arm: target for target in request.targets}
@@ -311,6 +315,9 @@ class MotionExecutor:
         recovery_attempted, goal_recovery = False, None
         ik_statistics = Counter()
         while executed < request.max_steps:
+            if budget.expired():
+                reason = "wall_time_budget"
+                break
             if state.ended:
                 reason = "native_end"
                 break
@@ -401,7 +408,7 @@ class MotionExecutor:
         targets_reached = (False if not pose_reached or False in opening_results else
                            None if unmeasured or None in opening_results else True)
         feedback = {
-            "targets_reached": targets_reached,
+            **budget.feedback(reason), "targets_reached": targets_reached,
             "goal_recovery": goal_recovery,
             "ik_statistics": dict(ik_statistics) if ik_statistics else None,
             "control_frames": {name: self.arms[name].control_frame for name in participants},
@@ -510,6 +517,9 @@ class MotionExecutor:
         }
 
     def _stationary(self, steps: int, grippers: dict[str, float]) -> dict:
+        budget = MotionBudget(self.backend.description, steps)
+        if budget.limits and self.wholepath:
+            raise RequestRejected("Bounded Direct motion requires stepwise execution")
         if self.wholepath:
             return self._stationary_wholepath(steps, grippers)
         start = state = self._state()
@@ -522,6 +532,9 @@ class MotionExecutor:
         no_execution = True
         reason, evidence = "requested_step_budget", None
         for _ in range(steps):
+            if budget.expired():
+                reason = "wall_time_budget"
+                break
             if state.ended:
                 reason = "native_end"
                 break
@@ -559,7 +572,7 @@ class MotionExecutor:
                             **(openings[name].feedback() if name in openings else
                                {"opening_reached": None, "opening_status": "unavailable"})}
                      for name, value in grippers.items()},
-            "requested_steps": steps, "steps_executed": executed,
+            **budget.feedback(reason), "requested_steps": steps, "steps_executed": executed,
             "executed_native_steps": state.native_steps - start.native_steps,
             "stop_reason": reason, "stop_evidence": evidence,
             "no_execution": no_execution,

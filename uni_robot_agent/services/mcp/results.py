@@ -14,14 +14,14 @@ def encode_call_result(result: ExecutionResult) -> dict[str, Any]:
     output = result.output
     content: list[dict[str, Any]] = []
     if output is not None:
-        content.extend(
-            {
+        for image in output.images:
+            if image.label:
+                content.append({"type": "text", "text": image.label})
+            content.append({
                 "type": "image",
                 "data": base64.b64encode(image.data).decode("ascii"),
                 "mimeType": image.mime_type,
-            }
-            for image in output.images
-        )
+            })
     text = output.model_json() if output is not None else json.dumps(result.to_dict(), ensure_ascii=False, default=str)
     content.append({
         "type": "text",

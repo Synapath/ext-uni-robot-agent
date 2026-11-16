@@ -105,6 +105,19 @@ recorded images pruned by the CLI are restored from the frozen local history,
 then projected again. Other history/header changes fail before count/generation. The
 fixed task and last two tool receipts use explicit ephemeral5m cache controls;
 the current RGB/calibration tail is never marked. Hits refresh this lifetime.
+The dynamic RGB user message precedes any native trailing system directives:
+nonempty inline system messages must precede an assistant or end the array.
+Removing the dynamic observation still leaves exactly the append-only native
+text chronology; no synthetic assistant or rewritten system text is inserted.
+Fable5.2 binds private thinking signatures to the entire earlier visual prefix.
+Current-only RGB therefore opts into the official
+`thinking.block_binding.prefix_mismatch_behavior="drop_block"` control and its
+beta header, consistently for count/generation. The provider may omit invalid
+private thinking; signed wire blocks, visible intents and tool receipts remain
+archived unchanged. Capture response `input_transformations`; do not claim full
+private-reasoning retention or guaranteed cache hits. Ordinary policies do not
+enable this option. See the
+[provider contract](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/prefix-checks).
 Responses30m controls are not translated onto the Messages wire. Native count
 requests remove only cache metadata, retaining identical text/images/schema.
 Use `CacheStableDirectFableBudgetGate(..., profile=...)` for independent trusted

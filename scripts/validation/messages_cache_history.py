@@ -10,10 +10,10 @@ from cache_history import observation
 from uni_robot_agent.context.history import ContextRequest
 from uni_robot_agent.context.policies.append_only_observation import AppendOnlyObservationPolicy
 from uni_robot_agent.context.policies.append_only_messages import (
-    CACHE_CONTROL, persistent_messages, without_cache_control, validate_messages_effective)
+    CACHE_CONTROL, BINDING_DROP, BINDING_BETA, persistent_messages, without_cache_control, validate_messages_effective)
 from uni_robot_agent.integrations.robodojo.context_profile import ROBODOJO_X5_25HZ as X5
 from uni_robot_agent.provider.budget.core import Ledger, Stop
-from uni_robot_agent.provider.budget.messages import DirectFableLimits, CacheStableDirectFableBudgetGate
+from uni_robot_agent.provider.budget.messages import DirectFableLimits, CacheStableDirectFableBudgetGate, prepare_messages
 
 
 def body():
@@ -85,7 +85,8 @@ class MessagesCacheChecks(unittest.TestCase):
             elif mutation == 'intent':bad['messages'][1]['content'][1]['text'] = 'changed'
             elif mutation == 'tool_id':bad['messages'][1]['content'][2]['id'] = 'changed'
             else:bad['messages'][2]['content'][0]['content'][0]['text'] = '{}'
-            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, 'history_or_header_changed'):
+            reason = 'prepared_fable_adaptive' if mutation == 'thinking' else 'history_or_header_changed'
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, reason):
                 select(p, bad)
         raw['messages'].extend(pair(2));select(p, raw)
 
@@ -121,6 +122,47 @@ class MessagesCacheChecks(unittest.TestCase):
         new = select(p, raw)
         self.assertEqual(new['messages'][1], inline)
         self.assertEqual(persistent_messages(new)[:2], persistent_messages(old))
+
+    def test_current_rgb_precedes_trailing_system_and_persistent_text_still_appends(self):
+        raw = body();raw['messages'].extend(pair(1))
+        inline = {'role': 'system', 'content': [{'type': 'text', 'text': 'Native CLI reminder.'}]}
+        raw['messages'].append(inline)
+        p = AppendOnlyObservationPolicy(profile=X5);old = select(p, raw)
+        self.assertEqual(old['messages'][-1], inline)
+        self.assertTrue(old['messages'][-2]['content'][0]['text'].startswith('[RUA CURRENT OBSERVATION]\n'))
+        validate_messages_effective(old, profile=X5)
+        bad = deepcopy(old);bad['messages'][-2:] = reversed(bad['messages'][-2:])
+        with self.assertRaisesRegex(ValueError, 'inline_system_placement'):validate_messages_effective(bad, profile=X5)
+        raw['messages'].extend(pair(2));new = select(p, raw)
+        self.assertEqual(persistent_messages(new)[:len(persistent_messages(old))], persistent_messages(old))
+
+    def test_consecutive_native_system_group_and_effort_guard(self):
+        raw = body();raw['messages'].extend(pair(1))
+        raw['messages'].extend([{'role':'system','content':[],'output_config':{'effort':'high'}},
+                               {'role':'system','content':[{'type':'text','text':'Native reminder.'}]}])
+        effective=select(AppendOnlyObservationPolicy(profile=X5),raw)
+        validate_messages_effective(effective,profile=X5)
+        prepare_messages(effective,DirectFableLimits())
+        bad=deepcopy(effective);bad['messages'][-2]['output_config']['effort']='max'
+        with self.assertRaisesRegex(Stop,'inline_effort_mismatch'):prepare_messages(bad,DirectFableLimits())
+
+    def test_binding_controls_match_in_count_generation_and_headers(self):
+        raw=body();raw['messages'].extend(pair(1))
+        effective=select(AppendOnlyObservationPolicy(profile=X5),raw)
+        self.assertEqual(effective['thinking']['block_binding'],BINDING_DROP)
+        with tempfile.TemporaryDirectory() as d:
+            ledger=Ledger(Path(d)/'ledger',DirectFableLimits());ledger.claim('fixture')
+            calls=[]
+            gate=CacheStableDirectFableBudgetGate(ledger,'fixture',lambda *args:calls.append(args),profile=X5)
+            try:
+                prepared,count=gate.prepare(effective)
+                self.assertEqual(prepared['thinking'],count['thinking'])
+                for path,b in ((gate.count_path,count),(gate.generation_path,prepared)):
+                    gate.forward_request(path,b,{'anthropic-beta':'existing-beta'})
+                self.assertTrue(all(v[2]['anthropic-beta']=='existing-beta,'+BINDING_BETA for v in calls))
+                bad=deepcopy(effective);bad['thinking'].pop('block_binding')
+                with self.assertRaisesRegex(ValueError,'thinking_binding'):validate_messages_effective(bad,profile=X5)
+            finally:ledger.db.close()
 
     def test_compaction_and_foreign_cache_fields_rejected(self):
         for update in ({'context_management': {'edits': [{'type': 'compact'}]}},

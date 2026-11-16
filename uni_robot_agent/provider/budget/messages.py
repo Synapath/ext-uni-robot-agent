@@ -45,6 +45,9 @@ def prepare_messages(body, limits):
         raise Stop('missing_messages')
     if body.get('thinking', {}).get('type', 'adaptive') != 'adaptive':
         raise Stop('adaptive_thinking_required')
+    from uni_robot_agent.context.policies.append_only_messages import BINDING_DROP
+    if body.get('thinking', {}).get('block_binding') not in (None, BINDING_DROP):
+        raise Stop('unprepared_thinking_binding')
     context=body.get('context_management')
     if context is not None and context != {'edits':[{'type':'clear_thinking_20251015','keep':'all'}]}:
         raise Stop('context_editing_disabled')
@@ -57,6 +60,10 @@ def prepare_messages(body, limits):
         raise Stop('unknown_messages_field')
     if set(body.get('output_config', {})) - {'effort'}:
         raise Stop('output_format_not_prepared')
+    for message in body['messages']:
+        if message.get('role') == 'system' and 'output_config' in message:
+            if message['output_config'] != {'effort': limits.effort}:
+                raise Stop('inline_effort_mismatch')
     for tool in body.get('tools', []):
         if (not isinstance(tool, dict) or tool.get('type', 'custom') != 'custom'
             or not tool.get('name', '').startswith(PREFIX)
@@ -136,6 +143,10 @@ class MessagesBudgetGate(BudgetGate):
         selected={k.lower():v for k,v in headers.items() if k.lower() in {'anthropic-version','anthropic-beta'}}
         if 'fast-mode' in selected.get('anthropic-beta',''):
             raise Stop('fast_mode_disabled')
+        from uni_robot_agent.context.policies.append_only_messages import BINDING_DROP,BINDING_BETA
+        if body.get('thinking', {}).get('block_binding') == BINDING_DROP:
+            betas=[b.strip() for b in selected.get('anthropic-beta','').split(',') if b.strip()]
+            selected['anthropic-beta']=','.join(dict.fromkeys([*betas,BINDING_BETA]))
         return self.forward(path,body,selected)
 
     def complete(self,raw):

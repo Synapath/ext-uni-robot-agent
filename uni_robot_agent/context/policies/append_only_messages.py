@@ -16,6 +16,8 @@ from .append_only_observation import (
 )
 
 CACHE_CONTROL = {'type': 'ephemeral', 'ttl': '5m'}
+BINDING_DROP = {'prefix_mismatch_behavior': 'drop_block'}
+BINDING_BETA = 'thinking-binding-controls-2026-08-01'
 HEADER_KEYS = ('model', 'system', 'tools', 'tool_choice', 'thinking',
                'output_config', 'context_management')
 
@@ -96,10 +98,29 @@ def restore_archived_images(old, new):
 
 def persistent_messages(body):
     messages = without_cache_control(body['messages'])
-    if messages and any(p.get('text', '').startswith(CURRENT+'\n')
-                        for p in messages[-1].get('content', []) if isinstance(p, dict)):
-        return messages[:-1]
-    return messages
+    return [m for m in messages if not is_current_observation(m)]
+
+
+def is_current_observation(message):
+    parts = message.get('content', [])
+    return message.get('role') == 'user' and isinstance(parts, list) and any(
+        p.get('text', '').startswith(CURRENT+'\n') for p in parts if isinstance(p, dict))
+
+
+def position_current_observation(body):
+    """Keep the dynamic user tail before native trailing system directives.
+
+    Messages requires a nonempty inline system message to precede an assistant
+    or end the array. Appending RGB after that system message violates the API.
+    Its original position in persistent text remains unchanged across turns.
+    """
+    messages = body['messages']
+    if messages and is_current_observation(messages[-1]):
+        tail = messages.pop()
+        index = len(messages)
+        while index and messages[index-1]['role'] == 'system':
+            index -= 1
+        messages.insert(index, tail)
 
 
 def mark_boundaries(body):
@@ -124,6 +145,21 @@ def mark_boundaries(body):
 def validate_messages_effective(body, *, profile):
     """Validate selected pixels/state plus exact native cache boundary positions."""
     clean = without_cache_control(body)
+    if clean.get('model') != 'claude-fable-5-2' or clean.get('thinking', {}).get('block_binding') != BINDING_DROP:
+        raise ValueError('prepared_fable_thinking_binding_required')
+    messages = clean['messages']
+    tails = [i for i, m in enumerate(messages) if is_current_observation(m)]
+    if len(tails) > 1 or (tails and any(m['role'] != 'system' for m in messages[tails[0]+1:])):
+        raise ValueError('messages_current_observation_not_tail')
+    index = 0
+    while index < len(messages):
+        if messages[index]['role'] != 'system':
+            index += 1;continue
+        end = index
+        while end < len(messages) and messages[end]['role'] == 'system':end += 1
+        if any(m.get('content') for m in messages[index:end]) and end < len(messages) and messages[end]['role'] != 'assistant':
+            raise ValueError('messages_inline_system_placement')
+        index = end
     expected = deepcopy(clean)
     mark_boundaries(expected)
     if expected != body:
@@ -134,7 +170,7 @@ def validate_messages_effective(body, *, profile):
 
 
 class AppendOnlyMessagesPolicy:
-    name, version = 'append_only_observation', 'messages-1'
+    name, version = 'append_only_observation', 'messages-3'
 
     def __init__(self, *, profile):
         self.projector = AppendOnlyObservationPolicy(profile=profile)
@@ -144,12 +180,15 @@ class AppendOnlyMessagesPolicy:
 
     @property
     def options(self):
-        return {**self.projector.options, 'ttl': '5m', 'wire_format': 'messages'}
+        return {**self.projector.options, 'ttl': '5m', 'wire_format': 'messages',
+                'thinking_prefix_mismatch': 'drop_block'}
 
     def select(self, request):
         if request.preserve_history:
             raise ValueError('append_only_requires_native_messages_without_compaction')
         body = canonical_messages(request.body)
+        if body.get('model') != 'claude-fable-5-2' or body.get('thinking', {}).get('type') != 'adaptive':
+            raise ValueError('prepared_fable_adaptive_thinking_required')
         if len(body['messages']) < len(self._messages):
             raise ValueError('append_only_messages_history_or_header_changed')
         for index, old in enumerate(self._messages):
@@ -172,11 +211,16 @@ class AppendOnlyMessagesPolicy:
                 decisions.append(decision)
                 return without_cache_markers(decision.request.body), decision.options
             effective, stats = project_observations(body, project)
-            note = CACHE_HISTORY_PROMPT+'\n'+self.profile.instruction()
+            note = (CACHE_HISTORY_PROMPT+'\nNative runtime system directives may follow the current observation. '
+                    'When old visual prefixes are replaced, the provider may discard only their mismatched '
+                    'private thinking blocks. Visible intents, commands and receipts remain intact; '
+                    'keep brief visible intent and expected effects when useful.\n'+self.profile.instruction())
             system = effective.get('system', [])
             if isinstance(system, str):
                 system = [{'type': 'text', 'text': system}] if system else []
             effective['system'] = [{'type': 'text', 'text': note}, *system]
+            effective.setdefault('thinking', {'type':'adaptive'})['block_binding'] = dict(BINDING_DROP)
+            position_current_observation(effective)
             boundaries = mark_boundaries(effective)
             validate_messages_effective(effective, profile=self.profile)
         except Exception:

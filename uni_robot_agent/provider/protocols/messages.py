@@ -139,7 +139,7 @@ class MessagesProtocol:
 
 def validate_context_policy(name):
     """Non-identity policies must explicitly preserve native Messages semantics."""
-    from uni_robot_agent.context.history import create_context_policy
-    policy = create_context_policy(name)
+    from uni_robot_agent.context.history import context_policy_type
+    policy = context_policy_type(name)
     if name != 'identity' and 'messages' not in getattr(policy, 'wire_formats', ()):
         raise ValueError('Context policy does not declare native Messages support')

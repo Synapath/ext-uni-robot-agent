@@ -55,6 +55,10 @@ def observation_view(body):
     items = []
     for mi, message in enumerate(body['messages']):
         content = message['content']
+        # The pinned CLI emits native inline system messages. They are neither
+        # robot observations nor user segments; preserve them only in the wire.
+        if message['role'] == 'system':
+            continue
         if message['role'] == 'assistant':
             for block in content if isinstance(content, list) else []:
                 if block.get('type') == 'tool_use':

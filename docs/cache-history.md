@@ -95,6 +95,27 @@ them with their frozen source. New protocols must select the profile and pin the
 new source. Direct helper callers must now pass `profile=...`; clock helpers
 require `control_hz=...`. There is no silent compatibility fallback to X5.
 
+## Native Messages
+
+The explicit profile also supports native Messages via the same
+`append_only_observation` policy. User observations reuse the shared projection;
+assistant text, thinking signatures, tool IDs and inline system messages stay
+native. Equivalent SDK string/list text forms are canonicalized; previously
+recorded images pruned by the CLI are restored from the frozen local history,
+then projected again. Other history/header changes fail before count/generation. The
+fixed task and last two tool receipts use explicit ephemeral5m cache controls;
+the current RGB/calibration tail is never marked. Hits refresh this lifetime.
+Responses30m controls are not translated onto the Messages wire. Native count
+requests remove only cache metadata, retaining identical text/images/schema.
+Use `CacheStableDirectFableBudgetGate(..., profile=...)` for independent trusted
+validation. Existing identity/observation-window behavior is unchanged.
+
+```bash
+PYTHONPATH=. python scripts/validation/messages_cache_history.py
+```
+
+See the [official caching contract](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+
 ## Checks
 
 ```sh

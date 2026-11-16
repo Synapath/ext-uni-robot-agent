@@ -85,16 +85,14 @@ class ProfileChecks(unittest.TestCase):
         a=args();a.integration='piper_x'
         with self.assertRaisesRegex(ValueError,'unsupported_robot'):resolve_context_config(a)
 
-    def test_profile_does_not_enable_claude_cache_or_silent_compaction(self):
-        with self.assertRaisesRegex(ValueError,'native_responses'):
-            AppendOnlyObservationPolicy(profile=X5).select(ContextRequest(body(),wire_format='messages'))
+    def test_profile_enables_native_claude_but_not_silent_compaction(self):
         a=args(context_max_input_tokens=100)
         with self.assertRaisesRegex(ValueError,'silently trim'):resolve_context_config(a)
         config=SessionConfig(integration='robodojo',env_url='http://127.0.0.1:1',no_sam3=True,
             tool_profile='direct',agent=AgentConfig(model='claude-fable-5-2',agent_backend='claude_code',
             provider_url='http://127.0.0.1:2',context_policy='append_only_observation',
             context_robot_profile=X5.name))
-        with self.assertRaisesRegex(ValueError,'native Responses'):config.resolve()
+        config.resolve()
 
     def test_prepared_description_rejected_before_model_start(self):
         validate_context_episode(args(),SimpleNamespace(description=description()))

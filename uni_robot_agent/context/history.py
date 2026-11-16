@@ -152,8 +152,8 @@ def register_context_policy(name: str):
     return wrapper
 
 
-def create_context_policy(name: str, **options):
-    """Create a fresh context policy by name."""
+def context_policy_type(name: str):
+    """Inspect declared capabilities without constructing profile-bound state."""
     if name not in _CONTEXT_POLICY_REGISTRY:
         try:
             importlib.import_module(f"uni_robot_agent.context.policies.{name}")
@@ -165,7 +165,12 @@ def create_context_policy(name: str, **options):
             raise ValueError(
                 f"Unknown context policy: {name!r}. Available: {available}"
             ) from exc
-    return _CONTEXT_POLICY_REGISTRY[name](**options)
+    return _CONTEXT_POLICY_REGISTRY[name]
+
+
+def create_context_policy(name: str, **options):
+    """Create a fresh context policy by name."""
+    return context_policy_type(name)(**options)
 
 
 def list_context_policies() -> list[str]:

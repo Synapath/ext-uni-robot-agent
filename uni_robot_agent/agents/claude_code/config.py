@@ -14,11 +14,15 @@ class ClaudeConfig:
         group.add_argument("--claude-max-budget-usd", type=float, default=argparse.SUPPRESS,
                            help="Optional SDK cost ceiling; unset disables the SDK budget cap")
         group.add_argument("--claude-effort", choices=("low", "medium", "high", "max"), default=argparse.SUPPRESS)
+        group.add_argument("--claude-cli-path", default=argparse.SUPPRESS)
+        group.add_argument("--claude-native-tools", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS)
 
     @classmethod
     def resolve_defaults(cls, args):
         args.claude_max_budget_usd = getattr(args, "claude_max_budget_usd", None)
         args.claude_effort = getattr(args, "claude_effort", None)
+        args.claude_cli_path = getattr(args, "claude_cli_path", None)
+        args.claude_native_tools = getattr(args, "claude_native_tools", True)
         if args.reasoning_effort is None:
             args.reasoning_effort = "none"
         if args.provider_url is None:
@@ -33,8 +37,8 @@ class ClaudeConfig:
             raise ValueError("Codex MCP dispatch options require --agent codex")
         if args.reasoning_effort != "none":
             raise ValueError("Use --claude-effort for Claude Code reasoning configuration")
-        if args.context_policy != "identity":
-            raise ValueError("Claude Code currently supports only identity context policy")
+        from uni_robot_agent.provider.protocols.messages import validate_context_policy
+        validate_context_policy(args.context_policy)
         if not args.provider_url:
             raise ValueError("Claude Code requires --provider-url or ANTHROPIC_BASE_URL")
         if urlsplit(args.provider_url).scheme not in {"http", "https"}:
@@ -47,4 +51,5 @@ class ClaudeConfig:
     @classmethod
     def config_options(cls, args):
         return {"api_key": args._api_key, "max_budget_usd": args.claude_max_budget_usd,
-                "effort": args.claude_effort}
+                "effort": args.claude_effort, "cli_path": args.claude_cli_path,
+                "native_tools": args.claude_native_tools}

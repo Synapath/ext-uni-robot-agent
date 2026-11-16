@@ -1,5 +1,8 @@
 # Model providers
 
+Optional durable budgets and phase-safe retry use the existing provider path;
+see [persistent provider admission](provider-budget.md) for ownership and SDK compatibility.
+
 Provider profiles describe a service endpoint and its wire protocol, independently
 of the planner SDK and model name. A model identifier such as `qwen3.8-flash`
 does not identify the hosting service or select an adapter automatically.

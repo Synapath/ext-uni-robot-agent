@@ -128,11 +128,18 @@ class MessagesProtocol:
         return result
 
     def validate_context(self, context_manager):
-        if context_manager.policy_metadata["name"] != "identity":
-            raise ValueError("Messages currently supports only identity context policy")
+        validate_context_policy(context_manager.policy_metadata['name'])
 
     def exception_response(self, error):
         return self.error_response({"message": str(error)})
 
     def error_response(self, failure):
         return {"type": "error", "error": {"type": "api_error", "message": failure["message"]}}
+
+
+def validate_context_policy(name):
+    """Non-identity policies must explicitly preserve native Messages semantics."""
+    from uni_robot_agent.context.history import create_context_policy
+    policy = create_context_policy(name)
+    if name != 'identity' and 'messages' not in getattr(policy, 'wire_formats', ()):
+        raise ValueError('Context policy does not declare native Messages support')

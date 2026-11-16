@@ -269,10 +269,13 @@ class AgentConfig(BaseModel):
     gemini_bridge_manifest: str | None = None
     codex_base_prompt: Literal["default", "robot"] = "robot"
     codex_web_search: Literal["disabled", "cached", "live"] | None = None
+    codex_sdk_options: dict[str, Any] | None = None
     mcp_parallel_dispatch: bool = False
     mcp_timeout_s: int | None = Field(default=None, gt=0)
     claude_max_budget_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     claude_effort: Literal["low", "medium", "high", "max"] | None = None
+    claude_cli_path: str | None = None
+    claude_native_tools: bool = True
 
 
 class SessionConfig(BaseModel):

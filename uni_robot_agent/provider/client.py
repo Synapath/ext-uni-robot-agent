@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 from uni_robot_agent.context import ContextManager, PreparedContext
 from uni_robot_agent.context.history import create_context_policy
@@ -48,6 +50,9 @@ class ModelClient:
         retry_http_errors: bool = True,
         retry_response_errors: bool = True,
         retryable_exceptions: tuple[type[Exception], ...] = (Exception,),
+        retry_policy=None,
+        request_guard=None,
+        attempt_recorder=None,
         tracer=None,
     ) -> None:
         if request_timeout_s <= 0 or max_retries < 0 or retry_backoff_initial_s < 0:
@@ -87,6 +92,13 @@ class ModelClient:
         self._retry_http_errors = retry_http_errors
         self._retry_response_errors = retry_response_errors
         self._retryable_exceptions = retryable_exceptions
+        self._retry_policy = retry_policy
+        self._request_guard = request_guard
+        self._attempt_recorder = attempt_recorder
+        if retry_policy is not None:
+            self._max_retries = retry_policy.max_retries
+            self._retry_http_errors = False
+            self._retry_response_errors = False
 
     def prepare_request(
         self,
@@ -177,7 +189,10 @@ class ModelClient:
     ) -> tuple[int, Any, bytes]:
         """Retry one fixed body only before any bytes reach its consumer."""
         attempts = exchange["provider_attempts"] if exchange is not None else []
+        request_digest = hashlib.sha256(request_bytes).hexdigest()
         for attempt in range(self._max_retries + 1):
+            if self._request_guard is not None:
+                self._request_guard()
             if self._cancelled.is_set():
                 raise ModelRequestCancelled("Model request cancelled")
             started_at = time.monotonic()
@@ -197,9 +212,20 @@ class ModelClient:
                         "attempt": attempt + 1,
                         "status": cancelled_response.status_code if cancelled_response is not None else None,
                         "elapsed_s": round(time.monotonic() - started_at, 3),
-                        "error": f"{type(exc).__name__}: {exc}",
+                        "error": type(exc).__name__ if self._retry_policy else f"{type(exc).__name__}: {exc}",
                     }
                 )
+                safe = True
+                if self._retry_policy is not None:
+                    from .retry import retryable, error_details
+                    safe = retryable(urlsplit(target).path, exc)
+                    attempts[-1].update(error_details(exc))
+                if self._attempt_recorder is not None:
+                    self._attempt_recorder(dict(attempts[-1], target_path=urlsplit(target).path,
+                        request_sha256=request_digest,
+                        retry_safe=safe, max_retries=self._max_retries,
+                        delay_s=self._retry_policy.delay(attempt) if self._retry_policy and safe and attempt < self._max_retries else 0,
+                        will_retry=safe and attempt < self._max_retries and not self._cancelled.is_set()))
                 if (
                     self._cancelled.is_set()
                     or isinstance(exc, ModelRequestCancelled)
@@ -207,6 +233,7 @@ class ModelClient:
                     or isinstance(exc, HttpCallError)
                     and not self._retry_http_errors
                     or not isinstance(exc, self._retryable_exceptions)
+                    or not safe
                 ):
                     raise
                 self._wait_before_retry(attempt, "transport error")
@@ -232,6 +259,8 @@ class ModelClient:
                 if detail := response_error_detail(body, max_chars=500):
                     record["error"] = detail
             attempts.append(record)
+            if self._attempt_recorder is not None:
+                self._attempt_recorder(dict(record, target_path=urlsplit(target).path, request_sha256=request_digest))
             if self._cancelled.is_set():
                 raise ModelRequestCancelled("Model request cancelled")
             succeeded = 200 <= status < 300 and failure is None
@@ -269,6 +298,9 @@ class ModelClient:
 
     def _wait_before_retry(self, attempt: int, reason: str) -> None:
         delay_s = self._retry_backoff_initial_s * (2**attempt)
+        if self._retry_policy is not None:
+            policy = self._retry_policy
+            delay_s = policy.delay(attempt)
         logger.warning(
             "Provider request failed (%s); retry %d/%d in %.1fs",
             reason,
@@ -276,8 +308,15 @@ class ModelClient:
             self._max_retries,
             delay_s,
         )
-        if self._cancelled.wait(delay_s):
-            raise ModelRequestCancelled("Model request cancelled")
+        until = time.monotonic() + delay_s
+        while True:
+            if self._request_guard is not None:
+                self._request_guard()
+            remaining = until - time.monotonic()
+            if self._cancelled.wait(max(0, min(.1, remaining))):
+                raise ModelRequestCancelled("Model request cancelled")
+            if remaining <= 0:
+                return
 
 
 def _encode_json(value: dict[str, Any]) -> bytes:

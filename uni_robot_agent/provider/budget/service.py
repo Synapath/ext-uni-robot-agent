@@ -30,6 +30,7 @@ def serve_gate(gate, token, *, key_file=None, upstream_base_url=None,
     gateway = ProviderGateway(
         upstream_base_url or ('https://api.anthropic.com/v1' if messages else 'https://api.openai.com/v1'),
         protocol=protocol, admission=gate, local_bearer_token=token,
+        preserve_generation_controls=True,
         upstream_headers=headers, retry_policy=retry_policy or RetryPolicy(max_retries=0),
         request_guard=lambda: gate.ledger.check(gate.episode),
         attempt_recorder=record, trace_dir=trace_dir, artifacts=artifacts,

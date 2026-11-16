@@ -182,7 +182,8 @@ class NativeLoopbackChecks(unittest.TestCase):
                 key=Path(tmp)/'fixture.key';key.write_text('sk-unusable-test');key.chmod(0o600)
                 service,url=serve_gate(gate,'local-only',key_file=key,
                     upstream_base_url=f'http://127.0.0.1:{vendor.server_port}/v1')
-                body=({'model':limits.model,'reasoning':{'effort':'high'},'input':'fixture','stream':False}
+                body=({'model':limits.model,'reasoning':{'effort':'high'},'input':'fixture','stream':False,
+                       'parallel_tool_calls':False}
                       if kind=='responses' else {'model':limits.model,'messages':[{'role':'user','content':'fixture'}],
                           'output_config':{'effort':'high'},'thinking':{'type':'adaptive'},'stream':False})
                 try:
@@ -195,6 +196,8 @@ class NativeLoopbackChecks(unittest.TestCase):
                         self.assertEqual(client.post(url+'/unprepared',json=body,
                             headers={'Authorization':'Bearer local-only'}).status_code,403)
                     self.assertEqual(len(seen),2)
+                    if kind=='responses':
+                        self.assertIs(seen[-1][2]['parallel_tool_calls'],False)
                     self.assertEqual(ledger.snapshot()['generation_attempts'],1)
                     self.assertEqual(ledger.snapshot()['unsettled_reserved_usd'],0)
                     for _,headers,_ in seen:

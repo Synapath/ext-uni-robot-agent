@@ -76,6 +76,7 @@ class ProviderGateway:
         max_retries: int = 0,
         retry_backoff_initial_s: float = 2,
         model_parallel_tool_calls: bool = True,
+        preserve_generation_controls: bool = False,
         model_binding: ModelBinding | None = None,
         admission=None,
         local_bearer_token: str | None = None,
@@ -124,6 +125,7 @@ class ProviderGateway:
         self._local_bearer_token = local_bearer_token
         self._upstream_headers = dict(upstream_headers) if upstream_headers is not None else None
         self._model_parallel_tool_calls = model_parallel_tool_calls
+        self._preserve_generation_controls = preserve_generation_controls
         self._model_binding = model_binding
         self._event_bus = event_bus
         self._server: HttpServer | None = None
@@ -266,10 +268,9 @@ class ProviderGateway:
 
                 # Control model generation only; MCP/runtime owns execution exclusion.
                 # Copy so generation controls do not change the original client request.
-                source = self._protocol.generation_request(
-                    normalized if normalized is not None else request_json,
-                    self._model_parallel_tool_calls,
-                )
+                original = normalized if normalized is not None else request_json
+                source = (dict(original or {}) if self._preserve_generation_controls else
+                          self._protocol.generation_request(original, self._model_parallel_tool_calls))
                 # Select context before encoding the upstream protocol and vendor fields.
                 prepared, encoded = self._client.prepare_request(
                     source,

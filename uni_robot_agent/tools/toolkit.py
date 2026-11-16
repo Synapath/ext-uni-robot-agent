@@ -117,6 +117,7 @@ class Toolkit:
         self._tool_execution_seq: int = 0
         self._sequence_lock = threading.Lock()
         self._solved_fn: Callable[[], bool | None] | None = None
+        self._terminal_fn: Callable[[], str | None] | None = None
 
     def register_tools(self, tools: list[ToolDef]) -> None:
         for tool_def in tools:
@@ -134,6 +135,13 @@ class Toolkit:
             return None
         result = self._solved_fn()
         return None if result is None else bool(result)
+
+    def set_terminal_fn(self, fn: Callable[[], str | None]) -> None:
+        """Bind acknowledged episode termination without exposing its verdict."""
+        self._terminal_fn = fn
+
+    def terminal_reason(self) -> str | None:
+        return self._terminal_fn() if self._terminal_fn is not None else None
 
     def set_event_bus(self, bus: Any) -> None:
         """Inject the EventBus used by execute_tool() to emit ToolResult."""

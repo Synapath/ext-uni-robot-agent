@@ -1,5 +1,8 @@
 # Persistent provider admission
 
+For terminal-aware planning, expected resource stops and verdict/error
+separation, see [terminal lifecycle](terminal-lifecycle.md).
+
 RUA owns model networking, buffering, cancellation, retries and SDK compatibility.
 `provider/budget/` adds optional persistent admission to the existing
 `ProviderGateway → ModelClient → ModelTransport` path. It accepts native Responses

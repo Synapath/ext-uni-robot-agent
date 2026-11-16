@@ -322,7 +322,10 @@ class BudgetGate:
                     raise Stop("generation_" + state)
                 return status, headers, raw
             except Exception as error:
-                reason = str(error) if isinstance(error, Stop) else "upstream_transport_error"
+                status = getattr(error, 'status', None)
+                reason = (str(error) if isinstance(error, Stop) else
+                          f'upstream_http_{status}' if type(status) is int and 100 <= status <= 599 else
+                          "upstream_transport_error")
                 self.ledger.stop(self.episode, reason)
                 self.stopped.set()
                 raise Stop(reason) from None

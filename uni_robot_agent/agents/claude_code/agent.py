@@ -28,9 +28,10 @@ class ClaudeCodeAgent(ClaudeConfig):
     capabilities = AgentCapabilities()
 
     def __init__(self, *, model="sonnet", timeout_s=None, cwd=None, api_key=None,
-                 max_budget_usd=None, effort=None):
+                 max_budget_usd=None, effort=None, cli_path=None, native_tools=True):
         self._model, self._cwd, self._api_key = model, cwd, api_key
         self._budget, self._effort = max_budget_usd, effort
+        self._cli_path, self._native_tools = cli_path, native_tools
         self._deadline = None if timeout_s is None else time.monotonic() + timeout_s
         self._loop = self._task = None
         self._cancel_reason = None
@@ -91,6 +92,8 @@ class ClaudeCodeAgent(ClaudeConfig):
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
                 # uni-robot-agent retries a complete buffered exchange, before tool delivery.
                 "CLAUDE_CODE_MAX_RETRIES": "0",
+                "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+                "ENABLE_TOOL_SEARCH": "false",
                 # Keep native helpers and subagents on the explicitly selected provider model.
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL": self._model,
                 "ANTHROPIC_DEFAULT_SONNET_MODEL": self._model,
@@ -117,7 +120,9 @@ class ClaudeCodeAgent(ClaudeConfig):
                 max_turns=max_turns or None, max_budget_usd=self._budget,
                 max_buffer_size=64 * 1024 * 1024,
                 forward_subagent_text=True,
-                tools=list(NATIVE_TOOLS),
+                tools=list(NATIVE_TOOLS) if self._native_tools else [],
+                cli_path=self._cli_path,
+                plugins=[], fallback_model=None,
                 allowed_tools=["mcp__uni_robot_agent__" + name for name in tools.specs],
                 mcp_servers={"uni_robot_agent": tools.server()}, strict_mcp_config=True,
                 # The hook authorizes native tools, including access outside cwd.

@@ -49,6 +49,7 @@ class CodexAgent(CodexConfig):
         base_prompt: str = "robot",
         web_search: str | None = None,
         agent_python: str | None = None,
+        sdk_options: dict | None = None,
     ):
         if reasoning_effort not in REASONING_EFFORTS:
             raise ValueError(f"unsupported reasoning effort: {reasoning_effort}")
@@ -62,6 +63,7 @@ class CodexAgent(CodexConfig):
         self._api_key = api_key
         self._mcp_timeout_s = mcp_timeout_s
         self._mcp_parallel_dispatch = mcp_parallel_dispatch
+        self._sdk_options = sdk_options
         self._base_prompt = base_prompt
         self._web_search = web_search
         self._agent_python = validate_agent_python(agent_python)
@@ -162,6 +164,9 @@ class CodexAgent(CodexConfig):
             mcp_parallel_dispatch=self._mcp_parallel_dispatch,
             web_search=self._web_search,
         )
+        if self._sdk_options is not None:
+            from .runtime_policy import sdk_overrides
+            config_overrides += sdk_overrides(**self._sdk_options)
         turn_input = prompt.flatten()
         if self._base_prompt == "robot":
             if session_dir is None:
@@ -284,6 +289,8 @@ class CodexAgent(CodexConfig):
             message = "\n".join(texts)
         elif error:
             message = ""
+        elif state.get("stop_reason"):
+            message = "Planner stopped: " + state["stop_reason"]
         else:
             message = (
                 "Codex session ended without output (no agent messages or tool calls)"
@@ -375,7 +382,8 @@ class CodexAgent(CodexConfig):
                     )
         except Exception as e:
             # Interrupting an SDK stream can raise while unwinding the expected stop.
-            if state.get("stop_reason") in {"max_turns", "wall_time_limit"}:
+            if state.get("stop_reason") in {"max_turns", "wall_time_limit", "environment_terminal",
+                                            "request_limit", "episode_budget_limit", "batch_budget_limit"}:
                 return
             import traceback
 

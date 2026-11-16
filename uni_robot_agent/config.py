@@ -163,8 +163,17 @@ def resolve_settings(args, integration_spec, *, explicit=(), agent_enabled=True)
 def public_config(args) -> dict:
     from urllib.parse import urlsplit, urlunsplit
 
+    def json_value(value):
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, dict):
+            return {key: json_value(child) for key, child in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [json_value(child) for child in value]
+        return value
+
     result = {
-        k: str(v) if isinstance(v, Path) else v
+        k: json_value(v)
         for k, v in vars(args).items()
         if k not in {"print_config", "validate_config"} and not k.startswith("_")
     }
@@ -269,10 +278,13 @@ class AgentConfig(BaseModel):
     gemini_bridge_manifest: str | None = None
     codex_base_prompt: Literal["default", "robot"] = "robot"
     codex_web_search: Literal["disabled", "cached", "live"] | None = None
+    codex_sdk_options: dict[str, Any] | None = None
     mcp_parallel_dispatch: bool = False
     mcp_timeout_s: int | None = Field(default=None, gt=0)
     claude_max_budget_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     claude_effort: Literal["low", "medium", "high", "max"] | None = None
+    claude_cli_path: str | None = None
+    claude_native_tools: bool = True
 
 
 class SessionConfig(BaseModel):

@@ -7,6 +7,7 @@ import json
 import time
 import traceback
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -75,7 +76,16 @@ class ProviderGateway:
         max_retries: int = 0,
         retry_backoff_initial_s: float = 2,
         model_parallel_tool_calls: bool = True,
+        preserve_generation_controls: bool = False,
         model_binding: ModelBinding | None = None,
+        admission=None,
+        local_bearer_token: str | None = None,
+        upstream_headers: Mapping[str, str] | None = None,
+        retry_policy=None,
+        request_guard=None,
+        attempt_recorder=None,
+        generation_guard=None,
+        on_local_stop=None,
         event_bus=None,
         tracer=None,
     ) -> None:
@@ -85,6 +95,8 @@ class ProviderGateway:
         self._protocol = protocol or ResponsesProtocol()
         self._adapter = adapter or build_provider_adapter(
             f"passthrough.{self._protocol.name}", client_protocol=self._protocol.name)
+        if admission is not None and self._adapter.profile_name != f'passthrough.{self._protocol.name}':
+            raise ValueError('Persistent admission currently requires a native passthrough provider')
         if context_manager is None:
             policy_name = context_policy
             policy = create_context_policy(policy_name, **dict(context_options or {}))
@@ -107,10 +119,19 @@ class ProviderGateway:
             max_retries=max_retries,
             retry_backoff_initial_s=retry_backoff_initial_s,
             tracer=tracer,
+            retry_policy=retry_policy,
+            request_guard=request_guard,
+            attempt_recorder=attempt_recorder,
         )
+        self._admission = admission
+        self._local_bearer_token = local_bearer_token
+        self._upstream_headers = dict(upstream_headers) if upstream_headers is not None else None
         self._model_parallel_tool_calls = model_parallel_tool_calls
+        self._preserve_generation_controls = preserve_generation_controls
         self._model_binding = model_binding
         self._event_bus = event_bus
+        self._generation_guard = generation_guard
+        self._on_local_stop = on_local_stop
         self._server: HttpServer | None = None
 
     @property
@@ -162,6 +183,12 @@ class ProviderGateway:
 
     def _forward(self, request_path, raw_request, incoming_headers, request):
         from uni_robot_agent.provider.contracts import LocalRequestProtocol, RoutedModelProtocol
+        if self._local_bearer_token is not None:
+            import hmac
+            if not hmac.compare_digest(incoming_headers.get('authorization', ''), 'Bearer ' + self._local_bearer_token):
+                return Response(status_code=403)
+        if self._admission is not None and not self._protocol.matches(request_path):
+            return Response(status_code=403)
         if isinstance(self._protocol, LocalRequestProtocol):
             local = self._protocol.local_response(request_path)
             if local is not None:
@@ -181,6 +208,12 @@ class ProviderGateway:
             and key.lower() not in {"host", "accept-encoding"}
         }
         headers["Accept-Encoding"] = "identity"
+        if self._upstream_headers is not None:
+            # Never forward the local SDK token or its arbitrary headers upstream.
+            headers = {key: value for key, value in headers.items()
+                       if key.lower() in {'content-type', 'accept', 'accept-encoding',
+                                          'anthropic-version', 'anthropic-beta'}}
+            headers.update(self._upstream_headers)
 
         exchange: dict[str, Any] | None = None
         prepared: PreparedContext | None = None
@@ -239,16 +272,18 @@ class ProviderGateway:
 
                 # Control model generation only; MCP/runtime owns execution exclusion.
                 # Copy so generation controls do not change the original client request.
-                source = self._protocol.generation_request(
-                    normalized if normalized is not None else request_json,
-                    self._model_parallel_tool_calls,
-                )
+                original = normalized if normalized is not None else request_json
+                source = (dict(original or {}) if self._preserve_generation_controls else
+                          self._protocol.generation_request(original, self._model_parallel_tool_calls))
                 # Select context before encoding the upstream protocol and vendor fields.
                 prepared, encoded = self._client.prepare_request(
                     source,
                     preserve_history=request_context.preserve_history,
                 )
                 provider_request = encoded.body
+                if self._admission is not None:
+                    provider_request, _ = self._admission.prepare(provider_request)
+                    encoded = replace(encoded, body=provider_request, training_body=provider_request)
                 exchange["context_policy"] = prepared.decision.to_dict()
                 attach_wire_views(
                     exchange,
@@ -260,6 +295,19 @@ class ProviderGateway:
                     profile=self._adapter.profile_name,
                 )
                 exchange["request"] = encoded.training_body
+                stop_reason = self._generation_guard() if self._generation_guard else None
+                if stop_reason:
+                    # Preserve the final acknowledged tool result for records, but
+                    # do not count, reserve, upload or generate after native end.
+                    exchange["local_stop_reason"] = stop_reason
+                    exchange["status"] = 409
+                    self._trace.prepared(exchange)
+                    return _GatewayResponse(
+                        self, request, exchange, None, status=409,
+                        headers={"Content-Type": "application/json"},
+                        body=_encode_json({"error": {"code": "rua_lifecycle_stop",
+                            "type": "local_lifecycle", "message": stop_reason}}), complete=False,
+                    )
                 try:
                     self._client.prepare_wire(provider_request, headers, exchange)
                 finally:
@@ -267,15 +315,22 @@ class ProviderGateway:
                     self._trace.prepared(exchange)
                 request_bytes = _encode_json(provider_request)
 
-            status, response_headers, provider_response = self._client.send(
-                target=target,
-                request_bytes=request_bytes,
-                headers=headers,
-                exchange=exchange,
-            )
+            if self._admission is not None:
+                status, response_headers, provider_response = self._admission.handle(provider_request, headers, exchange=exchange)
+            else:
+                status, response_headers, provider_response = self._client.send(
+                    target=target,
+                    request_bytes=request_bytes,
+                    headers=headers,
+                    exchange=exchange,
+                )
             if exchange is not None:
                 exchange["status"] = status
                 exchange["response_headers"] = dict(response_headers.items())
+                admission_reason = response_headers.get("x-rua-admission-stop")
+                if (urlsplit(self._upstream_base_url).hostname in {"127.0.0.1", "localhost", "::1"}
+                        and admission_reason in {"request_limit", "episode_budget_limit", "batch_budget_limit", "wall_time_limit"}):
+                    exchange["admission_stop_reason"] = admission_reason
 
             failure = (
                 exchange.get("response_error") if exchange is not None else None
@@ -329,13 +384,33 @@ class ProviderGateway:
                 complete=not failure,
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary records the failed exchange.
+            if self._admission is not None:
+                from uni_robot_agent.provider.budget.core import Stop
+                if isinstance(exc, Stop):
+                    reason = str(exc)
+                    self._admission.ledger.stop(self._admission.episode, reason)
+                    self._admission.stopped.set()
+                    if exchange is not None:
+                        exchange["admission_stop_reason"] = reason
+                        exchange["status"] = 429
+                    return _GatewayResponse(
+                        self, request, exchange, reply, status=429,
+                        headers={"Content-Type": "application/json", "x-rua-admission-stop": reason},
+                        body=_encode_json({"error": {"code": "rua_admission_stop",
+                            "type": "local_admission", "message": reason}}), complete=False,
+                    )
+            if self._admission is not None:
+                self._admission.ledger.stop(self._admission.episode, 'provider_exchange_failed')
+                self._admission.stopped.set()
             if exchange is not None:
-                exchange["error"] = f"{type(exc).__name__}: {exc}"
-                exchange["error_traceback"] = traceback.format_exc()
+                exchange["error"] = (type(exc).__name__ if self._admission is not None
+                                     else f"{type(exc).__name__}: {exc}")
+                exchange["error_traceback"] = None if self._admission is not None else traceback.format_exc()
             return _GatewayResponse(
                 self, request, exchange, reply,
                 status=502, headers={"Content-Type": "application/json"},
-                body=_encode_json(self._protocol.exception_response(exc)), complete=False,
+                body=_encode_json(self._protocol.exception_response(
+                    RuntimeError(type(exc).__name__) if self._admission is not None else exc)), complete=False,
             )
 
         finally:
@@ -410,6 +485,10 @@ class _GatewayResponse(Response):
                     await run_in_threadpool(self.gateway._trace.finish, self.exchange)
 
     def _failed(self, error, error_traceback):
+        if self.gateway._admission is not None:
+            admission = self.gateway._admission
+            admission.ledger.stop(admission.episode, 'downstream_delivery_unknown')
+            admission.stopped.set()
         if self.exchange is not None:
             self.exchange["client_disconnected"] = isinstance(error, ConnectionError)
             self.exchange["delivery_error"] = f"{type(error).__name__}: {error}"
@@ -423,6 +502,9 @@ class _GatewayResponse(Response):
         if self.exchange is not None:
             self.exchange["delivered"] = True
             self.exchange["complete"] = self.complete
+            reason = self.exchange.get("local_stop_reason") or self.exchange.get("admission_stop_reason")
+            if reason and self.gateway._on_local_stop:
+                self.gateway._on_local_stop(reason)
         if self.reply is not None and self.gateway._model_binding:
             if self.complete:
                 self.gateway._model_binding.response_written(self.reply)

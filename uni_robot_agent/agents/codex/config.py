@@ -88,4 +88,5 @@ class CodexConfig:
             "base_prompt": args.codex_base_prompt,
             "web_search": args.codex_web_search,
             "agent_python": args.agent_python,
+            "sdk_options": getattr(args, 'codex_sdk_options', None),
         }

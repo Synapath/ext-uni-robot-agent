@@ -8,7 +8,10 @@ from importlib.metadata import version
 
 def context_env():
     """Disable the pinned CLI's synthetic token-budget reminders."""
-    return {"CLAUDE_CODE_TOTAL_TOKENS_REMINDER": "off"}
+    return {"CLAUDE_CODE_TOTAL_TOKENS_REMINDER": "off",
+            # Keep structured temporal receipts intact before context projection.
+            # The provider admission still counts and bounds the selected input.
+            "MAX_MCP_OUTPUT_TOKENS": "128000"}
 
 
 def mcp_description_env(specs):

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from .core import BudgetGate, Limits, Stop, integer, read_private_key
@@ -157,6 +157,4 @@ class MessagesBudgetGate(BudgetGate):
 @dataclass(frozen=True)
 class DirectFableLimits(FableLimits):
     """Restricted Direct tool profile; pricing remains the frozen Fable bound."""
-    @property
-    def control_mode(self):
-        return 'direct_sync'
+    control_mode: str = field(default='direct_sync', init=False)

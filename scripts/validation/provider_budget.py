@@ -14,7 +14,7 @@ from uni_robot_agent.provider.client import ModelClient
 from uni_robot_agent.provider.retry import RetryPolicy, error_details
 from uni_robot_agent.provider.transport import ModelRequestCancelled
 from uni_robot_agent.provider.budget import Ledger, Limits, BudgetGate, Stop
-from uni_robot_agent.provider.budget.messages import DirectFableLimits, MessagesBudgetGate, prepare_messages
+from uni_robot_agent.provider.budget.messages import FableLimits, DirectFableLimits, MessagesBudgetGate, prepare_messages
 from uni_robot_agent.context.messages import project_observations
 
 
@@ -128,6 +128,7 @@ class ProviderBudgetChecks(unittest.TestCase):
             self.assertEqual(send.call_count,1)
 
     def test_messages_direct_allowlist_and_native_signed_history(self):
+        self.assertNotEqual(DirectFableLimits().digest, FableLimits().digest)
         thinking={'type':'thinking','thinking':'opaque fixture','signature':'fixture-signature'}
         body={'model':'claude-fable-5-2','thinking':{'type':'adaptive'},'output_config':{'effort':'high'},
             'messages':[{'role':'assistant','content':[thinking,{'type':'tool_use','id':'t1','name':'mcp__uni_robot_agent__move','input':{}}]},

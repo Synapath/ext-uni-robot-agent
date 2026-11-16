@@ -116,3 +116,27 @@ class DirectSolBudgetGate(SolBudgetGate):
         return self.ledger.settle(identity, inputs, outputs,
             charged_microdollars=int(amount.to_integral_value(rounding=ROUND_CEILING)))
 
+
+class CacheStableDirectSolBudgetGate(DirectSolBudgetGate):
+    """Optional trusted verification of append-only effective text and cache TTL."""
+    def prepare(self, body):
+        from uni_robot_agent.context.policies.append_only_observation import (
+            validate_effective_request, without_cache_markers, fingerprint)
+        validate_effective_request(body)
+        prepared, count = super().prepare(body)
+        if prepared.get('prompt_cache_options') != {'mode': 'explicit', 'ttl': '30m'}:
+            raise Stop('cache_stable_policy_required')
+        items = without_cache_markers(prepared['input'])
+        if items and any(p.get('text', '').startswith('[RUA CURRENT OBSERVATION]\n')
+                         for p in items[-1].get('content', []) if isinstance(p, dict)):
+            items = items[:-1]
+        hashes = [fingerprint(i) for i in items]
+        previous = getattr(self, '_stable_text', [])
+        header = fingerprint({k: prepared.get(k) for k in (
+            'model', 'instructions', 'tools', 'reasoning', 'parallel_tool_calls', 'prompt_cache_key')})
+        if (hashes[:len(previous)] != previous or
+                getattr(self, '_stable_header', header) != header):
+            raise Stop('trusted_append_only_history_changed')
+        self._stable_text, self._stable_header = hashes, header
+        return prepared, count
+

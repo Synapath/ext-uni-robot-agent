@@ -332,6 +332,11 @@ Codex can use the identity or sliding-window context policy. History transforms
 require an explicit provider URL. Claude Code uses its SDK's native model
 configuration and currently supports the identity context policy.
 
+An optional Responses [append-only text/current RGB policy](cache-history.md)
+preserves once-projected receipts, puts replaceable visuals at the end and
+prepares explicit 30-minute boundaries. It reuses ContextManager and the
+provider, without another SDK conversation or robot-state owner.
+
 ## Extending the agent
 
 - **Integration:** implement the [integration contract](integrations.md#integration-contract),

@@ -132,6 +132,8 @@ def resolve_settings(args, integration_spec, *, explicit=(), agent_enabled=True)
         from uni_robot_agent.provider.registry import validate_provider_profile
         args.provider_profile = args.provider_profile or f"passthrough.{agent_backend.model_protocol}"
         validate_provider_profile(args.provider_profile, client_protocol=agent_backend.model_protocol)
+        if args.context_policy == 'append_only_observation' and agent_backend.model_protocol != 'responses':
+            raise ValueError('append_only_observation requires native Responses')
         agent_backend.validate_config(args, explicit)
         if args.context_policy != "identity" and not args.provider_url:
             raise ValueError(
@@ -192,6 +194,8 @@ def resolve_context_config(args) -> dict:
     policy = getattr(args, "context_policy", "identity")
 
     options: dict[str, int] = {}
+    if policy == 'append_only_observation' and getattr(args, 'context_max_input_tokens', None) is not None:
+        raise ValueError('append_only_observation does not silently trim history')
     if policy == "sliding_window":
         maximum = getattr(args, "context_max_input_tokens", None)
         target = getattr(args, "context_target_input_tokens", None)
@@ -261,7 +265,7 @@ class AgentConfig(BaseModel):
     provider_retries: int = Field(default=2, ge=0)
     provider_retry_backoff_s: int = Field(default=5, ge=0)
     model_parallel_tool_calls: bool = True
-    context_policy: Literal["identity", "sliding_window", "observation_window"] = "identity"
+    context_policy: Literal["identity", "sliding_window", "observation_window", "append_only_observation"] = "identity"
     context_observation_horizon: int = Field(default=2, gt=0)
     context_image_token_allowance: int = Field(default=1536, gt=0)
     context_max_input_tokens: int | None = Field(default=None, gt=0)

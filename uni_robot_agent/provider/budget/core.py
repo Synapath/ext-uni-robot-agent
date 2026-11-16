@@ -195,6 +195,8 @@ class Ledger:
 
 
 def prepare_request(body: dict, limits: Limits):
+    from .cache import validate_cache, count_semantics
+    validate_cache(body)
     if not isinstance(body, dict) or body.get("model") != limits.model:
         raise Stop("model_mismatch")
     if body.get("reasoning", {}).get("effort") != limits.effort:
@@ -238,7 +240,7 @@ def prepare_request(body: dict, limits: Limits):
     count_body = {key: value for key, value in prepared.items() if key in {
         "model", "input", "instructions", "tools", "tool_choice", "parallel_tool_calls",
         "reasoning", "text", "personality", "truncation"}}
-    return prepared, count_body
+    return prepared, count_semantics(count_body)
 
 
 def response_terminal(raw: bytes):

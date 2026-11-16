@@ -67,7 +67,9 @@ class Adapter:
     def __init__(self, env, output, layout, layout_sha256, *, episode_id="episode", slot=0,
                  ik_joint_delta_guard=True, depth_enabled=True, calibration_enabled=True,
                  native_call=native_call, solver_factory=None, rgb_history_seconds=0.0,
-                 rgb_history_hz=5.0, direct_sim_seconds=None, direct_wall_seconds=None):
+                 rgb_history_hz=5.0, direct_sim_seconds=None, direct_wall_seconds=None, seed=0):
+        from .native_compat import validate_seed
+        self.seed = validate_seed(seed)
         if depth_enabled and not calibration_enabled:
             raise ValueError("Disabling camera calibration requires depth_enabled=False")
         self._native_call, self._solver_factory = native_call, solver_factory
@@ -132,8 +134,8 @@ class Adapter:
             raise RequestRejected("Native initialization was already attempted")
         self.started = True
         if reset:
-            self.env.seed_manager.seed_info = {self.slot: {"scene_layout": str(self.layout)}}
-            self.env.reset(seed=[0])
+            from .native_compat import reset_episode
+            reset_episode(self.env, self.layout, seed=self.seed, slot=self.slot)
             # Match native evaluation: rewards and supporting arms follow reset.
             self.env.run_reward()
             if hasattr(self.env, "get_score"):

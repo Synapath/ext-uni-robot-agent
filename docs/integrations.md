@@ -273,6 +273,15 @@ upstream revisions and retained licenses. The official environment server requir
 `--native-root` pointing to a clean pinned official checkout, including its submodules.
 External runtime trees are not packaged.
 
+For a frozen RoboDojo scene, `--seed` is the native reset/RNG seed (default0),
+independent of `--layout`. Nonnegative uint32 seeds are forwarded to native
+construction and reset. The asset layout directory remains0; the exact hashed
+layout is mapped to the requested reset seed, rather than silently selecting a
+different layout. Startup verifies the actual native seed before publishing the
+environment service. This is not a seed for a remote model API, nor a guarantee
+of deterministic GPU physics or model responses. Evaluation records preserve
+both seed and layout identity.
+
 ## RoboUse
 
 `--integration robouse` composes the shared scene, gripper, skill and episode tools

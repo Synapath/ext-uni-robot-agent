@@ -20,7 +20,9 @@ def epoch(value):
     raise Stop('invalid_wall_timestamp')
 
 
-def state_clock(state, *, control_hz=25):
+def state_clock(state, *, control_hz):
+    if isinstance(control_hz, bool) or not math.isfinite(control_hz) or control_hz <= 0:
+        raise Stop('invalid_control_frequency')
     step = state.get('native_steps')
     if type(step) is not int or step < 0:
         raise Stop('native_step_missing')
@@ -31,10 +33,12 @@ def state_clock(state, *, control_hz=25):
             'state_version': state.get('state_version', step), 'simulation_time_s': sim}
 
 
-def frame_clock(frame, *, current_step, latest_capture, returned_at=None, sample_index=0):
+def frame_clock(frame, *, control_hz, current_step, latest_capture, returned_at=None, sample_index=0):
+    if isinstance(control_hz, bool) or not math.isfinite(control_hz) or control_hz <= 0:
+        raise Stop('invalid_control_frequency')
     sim = frame['simulation_time_s']
     step = frame['state_version']
-    if type(step) is not int or step < 0 or step > current_step or abs(sim-step/25) > 1e-6:
+    if type(step) is not int or step < 0 or step > current_step or abs(sim-step/control_hz) > 1e-6:
         raise Stop('future_or_inconsistent_frame')
     capture = epoch(frame['captured_at_utc'])
     relative = capture-epoch(latest_capture)
@@ -43,7 +47,7 @@ def frame_clock(frame, *, current_step, latest_capture, returned_at=None, sample
             'native_step': step, 'state_version': step, 'simulation_time_s': sim,
             'captured_at_utc': frame['captured_at_utc'], 'sample_index': sample_index,
             'sensor_frame_index': frame.get('sensor_frame_index'),
-            'relative_sim_s': round(sim-current_step/25, 6),
+            'relative_sim_s': round(sim-current_step/control_hz, 6),
             'relative_capture_wall_s': round(relative, 6),
             'age_at_tool_return_s': (None if returned_at is None else
                                      round(epoch(returned_at)-capture, 6))}

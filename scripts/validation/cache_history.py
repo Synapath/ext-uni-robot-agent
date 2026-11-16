@@ -12,7 +12,9 @@ from uni_robot_agent.context.policies.append_only_observation import (
 from uni_robot_agent.provider.budget.core import prepare_request, Stop, Ledger
 from uni_robot_agent.provider.budget.responses import DirectSolLimits, CacheStableDirectSolBudgetGate
 
-CAMERAS = ('head', 'left_wrist', 'right_wrist')
+from uni_robot_agent.integrations.robodojo.context_profile import ROBODOJO_X5_25HZ
+
+CAMERAS = ROBODOJO_X5_25HZ.cameras
 
 
 def state(step):
@@ -61,7 +63,7 @@ def body(items=None):
 
 class CacheHistoryChecks(unittest.TestCase):
     def test_forty_turns_append_only_current_rgb_and_previous_boundary(self):
-        policy = AppendOnlyObservationPolicy(); raw = body(); previous = []
+        policy = AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ); raw = body(); previous = []
         for i in range(41):
             if i: raw['input'].extend(pair(i))
             effective = policy.select(ContextRequest(raw)).request.body
@@ -84,7 +86,7 @@ class CacheHistoryChecks(unittest.TestCase):
             previous = clean
 
     def test_history_header_mutation_and_compaction_fail_closed(self):
-        p = AppendOnlyObservationPolicy(); raw = body();p.select(ContextRequest(raw))
+        p = AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ); raw = body();p.select(ContextRequest(raw))
         for key,value in [('instructions','changed'),('reasoning',{'effort':'medium'})]:
             bad=deepcopy(raw);bad[key]=value
             with self.assertRaisesRegex(ValueError,'changed'):p.select(ContextRequest(bad))
@@ -93,7 +95,7 @@ class CacheHistoryChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'compaction'):p.select(ContextRequest(body(),preserve_history=True))
 
     def test_failed_prepare_does_not_commit_and_missing_camera_is_not_invented(self):
-        p=AppendOnlyObservationPolicy();raw=body();p.select(ContextRequest(raw))
+        p=AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ);raw=body();p.select(ContextRequest(raw))
         bad=deepcopy(raw);bad['input'].extend(pair(1,cameras=CAMERAS[:2]))
         with self.assertRaisesRegex(ValueError,'camera_set'):p.select(ContextRequest(bad))
         raw['input'].extend(pair(1))
@@ -102,7 +104,7 @@ class CacheHistoryChecks(unittest.TestCase):
 
     def test_bad_pair_unknown_execution_and_wrong_frame_fail(self):
         for kind in ('orphan','unknown','frame'):
-            p=AppendOnlyObservationPolicy();raw=body();parts=pair(1)
+            p=AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ);raw=body();parts=pair(1)
             if kind=='orphan':parts=parts[2:]
             else:
                 v=json.loads(parts[-1]['output'][0]['text'])
@@ -113,7 +115,7 @@ class CacheHistoryChecks(unittest.TestCase):
             with self.assertRaises(Exception):p.select(ContextRequest(raw))
 
     def test_count_has_same_semantics_without_cache_controls(self):
-        p=AppendOnlyObservationPolicy();raw=body();raw['input'].extend(pair(1))
+        p=AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ);raw=body();raw['input'].extend(pair(1))
         effective=p.select(ContextRequest(raw)).request.body
         generated,count=prepare_request(effective,DirectSolLimits())
         self.assertEqual(generated['input'],effective['input'])
@@ -126,8 +128,8 @@ class CacheHistoryChecks(unittest.TestCase):
     def test_trusted_parent_rejects_history_rewrite(self):
         with tempfile.TemporaryDirectory() as d:
             ledger=Ledger(Path(d)/'budget.db',DirectSolLimits());ledger.claim('mock')
-            gate=CacheStableDirectSolBudgetGate(ledger,'mock',None)
-            p=AppendOnlyObservationPolicy();raw=body()
+            gate=CacheStableDirectSolBudgetGate(ledger,'mock',None,profile=ROBODOJO_X5_25HZ)
+            p=AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ);raw=body()
             effective=p.select(ContextRequest(raw)).request.body
             gate.prepare(effective);gate.prepare(effective)
             raw['input'].extend(pair(1));effective=p.select(ContextRequest(raw)).request.body
@@ -137,7 +139,7 @@ class CacheHistoryChecks(unittest.TestCase):
             ledger.db.close()
 
     def test_current_frame_times_are_relative_to_latest_capture(self):
-        p=AppendOnlyObservationPolicy();raw=body();parts=pair(1)
+        p=AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ);raw=body();parts=pair(1)
         value=json.loads(parts[-1]['output'][0]['text'])
         # Current camera readout times can differ; retain that measured difference.
         for i,f in enumerate(value['temporal_rgb']['frames']):

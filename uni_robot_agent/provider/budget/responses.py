@@ -119,10 +119,15 @@ class DirectSolBudgetGate(SolBudgetGate):
 
 class CacheStableDirectSolBudgetGate(DirectSolBudgetGate):
     """Optional trusted verification of append-only effective text and cache TTL."""
+    def __init__(self, ledger, episode, forward, *, profile=None):
+        from uni_robot_agent.context.robot_profile import require_profile
+        self.profile = require_profile(profile)
+        super().__init__(ledger, episode, forward)
+
     def prepare(self, body):
         from uni_robot_agent.context.policies.append_only_observation import (
             validate_effective_request, without_cache_markers, fingerprint)
-        validate_effective_request(body)
+        validate_effective_request(body, profile=self.profile)
         prepared, count = super().prepare(body)
         if prepared.get('prompt_cache_options') != {'mode': 'explicit', 'ttl': '30m'}:
             raise Stop('cache_stable_policy_required')

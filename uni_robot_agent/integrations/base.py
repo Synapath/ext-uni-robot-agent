@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from uni_robot_agent.artifacts.store import ArtifactStore
 from uni_robot_agent.integrations.composition import ToolAssembly, ToolModule
 from uni_robot_agent.tools.toolkit import ToolProvider
+from uni_robot_agent.context.robot_profile import RobotContextProfile
 
 
 def _add_no_cli_args(_parser: argparse.ArgumentParser) -> None:
@@ -46,6 +47,7 @@ class IntegrationSpec:
     requires_env_url: bool = True
     deployment_module: str | None = None
     config_model: type[IntegrationOptions] = IntegrationOptions
+    context_profiles: Mapping[str, RobotContextProfile] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

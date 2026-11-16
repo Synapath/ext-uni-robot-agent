@@ -5,16 +5,21 @@ import math
 import warnings
 from .wire_history import FRAME, payload, records
 from .timing import frame_clock, state_clock, utc
+from .robot_profile import require_profile
 from uni_robot_agent.provider.budget.core import Stop
 
 DEMO = '[RUA DEMONSTRATIONS]'
 CURRENT = '[RUA CURRENT OBSERVATION]'
 
-def robot_state(state):
+def robot_state(state, *, profile):
+    profile = require_profile(profile)
     from scipy.spatial.transform import Rotation
-    out = {'clock': state_clock(state), 'frame': 'world', 'pose_site': 'x5_grasp_site',
+    if set(state.get('arms', {})) != set(profile.arm_names):
+        raise Stop('measured_arm_profile_mismatch')
+    out = {'clock': state_clock(state, control_hz=profile.control_hz),
+           'profile': profile.name, 'frame': profile.frame, 'pose_site': profile.pose_site,
            'format': '[x,y,z,roll,pitch,yaw,opening_m]', 'arms': {}, 'drive_intent': {}}
-    for name in ('left', 'right'):
+    for name in profile.arm_names:
         arm = state.get('arms', {}).get(name)
         if arm is None:
             raise Stop('measured_arm_missing')
@@ -35,7 +40,8 @@ def robot_state(state):
     return out
 
 
-def compact_result(value):
+def compact_result(value, *, profile):
+    profile = require_profile(profile)
     if value is None:
         return None
     out = deepcopy(value)
@@ -43,7 +49,7 @@ def compact_result(value):
         out.pop(key, None)
     if 'state' in out:
         state = out.pop('state')
-        out['robot_state'] = robot_state(state)
+        out['robot_state'] = robot_state(state, profile=profile)
         out['sim_feedback'] = {'ended': state.get('ended'),
                               'remaining_steps': state.get('metadata', {}).get('remaining_steps')}
     if 'feedback' in out:
@@ -61,7 +67,8 @@ def compact_result(value):
     return out
 
 
-def frames(parts, value):
+def frames(parts, value, *, profile):
+    profile = require_profile(profile)
     found, overlays, label, transport = [], [], None, ''
     for part in parts if isinstance(parts, list) else []:
         match = FRAME.search(part.get('text', ''))
@@ -94,7 +101,7 @@ def frames(parts, value):
     cameras = (value or {}).get('image_cameras', [])
     state = (value or {}).get('state', {})
     if not found and overlays and len(cameras) == len(overlays) and state and value.get('captured_at') is not None:
-        current = state_clock(state)
+        current = state_clock(state, control_hz=profile.control_hz)
         for camera, image in zip(cameras, overlays):
             f = {'camera': camera, 'frame_id': f"{value['snapshot_id']}:{camera}:current",
                  'simulation_time_s': current['simulation_time_s'],
@@ -106,7 +113,8 @@ def frames(parts, value):
     return found, overlays
 
 
-def select_frames(source, *, current_step, max_groups=3, window_s=2):
+def select_frames(source, *, profile, current_step, max_groups=3, window_s=2):
+    profile = require_profile(profile)
     if type(max_groups) is not int or not 1 <= max_groups <= 3 or not 0 < window_s <= 2:
         raise Stop('invalid_simple_window')
     if not source:
@@ -122,11 +130,12 @@ def select_frames(source, *, current_step, max_groups=3, window_s=2):
         if key in seen:
             raise Stop('duplicate_frame_id')
         seen.add(key)
-        frame_clock(f, current_step=current_step, latest_capture=source[-1]['captured_at_utc'])
+        frame_clock(f, control_hz=profile.control_hz, current_step=current_step,
+                    latest_capture=source[-1]['captured_at_utc'])
     if any({f['camera'] for f in group} != expected or len(group) != len(expected)
            for group in by_group.values()):
         raise Stop('unsynchronized_frame_groups')
-    versions = [v for v in versions if 0 <= (current_step-v)/25 <= window_s+1e-9]
+    versions = [v for v in versions if 0 <= (current_step-v)/profile.control_hz <= window_s+1e-9]
     if len(versions) > max_groups:
         indices = ([len(versions)-1] if max_groups == 1 else [0, len(versions)-1]
                    if max_groups == 2 else [0, len(versions)//2, len(versions)-1])

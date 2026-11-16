@@ -3,6 +3,7 @@ from copy import deepcopy
 from dataclasses import replace
 import hashlib
 import json
+import math
 import threading
 
 from uni_robot_agent.context.history import ContextDecision, register_context_policy
@@ -10,6 +11,7 @@ from uni_robot_agent.context.image_transport import restore_selected
 from uni_robot_agent.context.observation_history import estimate_context
 from uni_robot_agent.context.robot_observation import CURRENT, DEMO, compact_result, frames, select_frames
 from uni_robot_agent.context.timing import frame_clock, state_clock, epoch
+from uni_robot_agent.context.robot_profile import require_profile
 from uni_robot_agent.context.wire_history import FRAME, records
 
 
@@ -54,12 +56,11 @@ def mark(item):
 @register_context_policy('append_only_observation')
 class AppendOnlyObservationPolicy:
     """One instance per ContextManager/session; no hardware or model queries."""
-    name, version = 'append_only_observation', '1'
+    name, version = 'append_only_observation', '2'
 
-    def __init__(self, *, cameras=('head', 'left_wrist', 'right_wrist')):
-        self.cameras = tuple(cameras)
-        if not self.cameras or len(set(self.cameras)) != len(self.cameras):
-            raise ValueError('current_cameras_required')
+    def __init__(self, *, profile=None):
+        self.profile = require_profile(profile)
+        self.cameras = self.profile.cameras
         self._raw = []
         self._text = []
         self._header = None
@@ -69,7 +70,7 @@ class AppendOnlyObservationPolicy:
     @property
     def options(self):
         return {'current_groups': 1, 'cameras': list(self.cameras), 'text_history': 'append_only',
-                'cache_mode': 'explicit', 'ttl': '30m'}
+                'cache_mode': 'explicit', 'ttl': '30m', 'robot_profile': self.profile.metadata()}
 
     def select(self, request):
         with self._lock:
@@ -100,11 +101,11 @@ class AppendOnlyObservationPolicy:
         for row in rows:
             value = row['payload'] or {}
             if value.get('state'):
-                step = state_clock(value['state'])['native_step']
+                step = state_clock(value['state'], control_hz=self.profile.control_hz)['native_step']
                 if step < current:
                     raise ValueError('measured_state_regressed')
                 current = step
-            fs, extra = frames(row['result'].get('output'), value)
+            fs, extra = frames(row['result'].get('output'), value, profile=self.profile)
             if fs:
                 latest = (row, fs)
             if extra:
@@ -115,7 +116,7 @@ class AppendOnlyObservationPolicy:
             item = deepcopy(items[index])
             row = row_by_index.get(index)
             if row and row['payload'] is not None:
-                value = compact_result(row['payload'])
+                value = compact_result(row['payload'], profile=self.profile)
                 value.pop('camera_calibration', None)
                 value['action_id'] = row['call_id']
                 item['output'] = [{'type': 'input_text', 'text': json.dumps(value, separators=(',', ':'))}]
@@ -147,6 +148,9 @@ class AppendOnlyObservationPolicy:
         effective['input'] = deepcopy(text)
         effective['instructions'] = (body.get('instructions', '') if CACHE_HISTORY_PROMPT in body.get('instructions', '')
                                      else CACHE_HISTORY_PROMPT+'\n'+body.get('instructions', ''))
+        profile_note = self.profile.instruction()
+        if profile_note not in effective['instructions']:
+            effective['instructions'] += '\n'+profile_note
         effective['prompt_cache_options'] = {'mode': 'explicit', 'ttl': '30m'}
         boundaries = [head] + [r['result_index'] for r in rows][-2:]
         for index in dict.fromkeys(boundaries):
@@ -156,7 +160,7 @@ class AppendOnlyObservationPolicy:
             row, fs = latest
             if current < 0:
                 current = max(f['state_version'] for f in fs)
-            live = select_frames(fs, current_step=current, max_groups=1)
+            live = select_frames(fs, profile=self.profile, current_step=current, max_groups=1)
             if {f['camera'] for f in live} != set(self.cameras) or len(live) != len(self.cameras):
                 raise ValueError('current_camera_set_mismatch')
             value = row['payload']
@@ -164,9 +168,10 @@ class AppendOnlyObservationPolicy:
             if not set(self.cameras).issubset(calibration):
                 raise ValueError('current_calibration_missing')
             meta = {'schema_version': 1, 'snapshot_id': value['snapshot_id'],
-                    'native_step': current, 'state_version': current, 'simulation_time_s': current/25,
+                    'robot_profile': self.profile.metadata(),
+                    'native_step': current, 'state_version': current, 'simulation_time_s': current/self.profile.control_hz,
                     'live_frame_count': len(live), 'camera_calibration': calibration,
-                    'frames': [frame_clock(f, current_step=current,
+                    'frames': [frame_clock(f, control_hz=self.profile.control_hz, current_step=current,
                         latest_capture=max((x['captured_at_utc'] for x in live), key=epoch),
                         returned_at=value.get('tool_timing', {}).get('completed_at_utc')) for f in live]}
             content = [{'type': 'input_text', 'text': CURRENT+'\n'+json.dumps(meta, separators=(',', ':'))}]
@@ -182,7 +187,7 @@ class AppendOnlyObservationPolicy:
                                  ('\n'+image['transport'] if image['transport'] else '')}, image['image']])
             effective['input'].append({'type': 'message', 'role': 'user', 'content': content})
         effective = restore_selected(effective)
-        validate_effective_request(effective, cameras=self.cameras)
+        validate_effective_request(effective, profile=self.profile)
         before, after = estimate_context(body), estimate_context(effective)
         # Commit only after all decoding, image restoration and validation succeed.
         self._raw, self._text, self._header, self._head = digests, text, header, head
@@ -194,18 +199,26 @@ class AppendOnlyObservationPolicy:
                 'stable_prefix_sha256': fingerprint(text)})
 
 
-def validate_effective_request(body, *, cameras=('head', 'left_wrist', 'right_wrist')):
+def validate_effective_request(body, *, profile):
     """Validate the actual selected wire view, including trusted-hop checks."""
     from uni_robot_agent.context.wire_history import payload
     from uni_robot_agent.context.image_transport import has_references
+    profile = require_profile(profile)
+    cameras = profile.cameras
+    if profile.instruction() not in body.get('instructions', ''):
+        raise ValueError('robot_context_profile_header_missing')
     if has_references(body):
         raise ValueError('selected_images_not_restored')
     rows = records(body)
     latest = -1
     for row in rows:
         v = row['payload'] or {}
+        if 'state' in v:
+            raise ValueError('unprojected_robot_state')
         if 'camera_calibration' in v:
             raise ValueError('calibration_in_persistent_receipt')
+        if 'robot_state' in v:
+            profile.validate_projected_state(v['robot_state'])
         clock = v.get('robot_state', {}).get('clock')
         if clock:
             if clock['native_step'] < latest:
@@ -222,7 +235,13 @@ def validate_effective_request(body, *, cameras=('head', 'left_wrist', 'right_wr
         if any(t.startswith(CURRENT+'\n') for t in texts):
             meta = json.loads(next(t for t in texts if t.startswith(CURRENT+'\n')).split('\n', 1)[1])
             overlays = sum(t.startswith('[RUA CURRENT LOCALIZATION OVERLAY]') for t in texts)
-            if (index != len(body['input'])-1 or count != len(cameras)+overlays or overlays > 3
+            if (meta.get('robot_profile') != profile.metadata()
+                    or type(meta.get('native_step')) is not int or meta['native_step'] < 0
+                    or meta.get('state_version') != meta['native_step']
+                    or not isinstance(meta.get('simulation_time_s'), (int, float))
+                    or isinstance(meta['simulation_time_s'], bool) or not math.isfinite(meta['simulation_time_s'])
+                    or abs(meta['simulation_time_s']-meta['native_step']/profile.control_hz) > 1e-6
+                    or index != len(body['input'])-1 or count != len(cameras)+overlays or overlays > 3
                     or meta['live_frame_count'] != len(cameras) or len(meta['frames']) != len(cameras)
                     or {f['camera'] for f in meta['frames']} != set(cameras)
                     or not set(cameras).issubset(meta.get('camera_calibration', {}))):
@@ -232,7 +251,8 @@ def validate_effective_request(body, *, cameras=('head', 'left_wrist', 'right_wr
             for f in meta['frames']:
                 if f['state_version'] != meta['native_step']:
                     raise ValueError('historical_rgb_in_current_only_view')
-                frame_clock(f, current_step=meta['native_step'], latest_capture=f['captured_at_utc'])
+                frame_clock(f, control_hz=profile.control_hz, current_step=meta['native_step'],
+                            latest_capture=f['captured_at_utc'])
             tails.append(meta)
         elif count:
             if not any(DEMO in t for t in texts):

@@ -97,6 +97,7 @@ def resolve_settings(args, integration_spec, *, explicit=(), agent_enabled=True)
             "context budget/image options require a non-identity context policy"
         )
     policy_options = {
+        "append_only_observation": {"--context-robot-profile"},
         "observation_window": {"--context-observation-horizon", "--context-image-token-allowance"},
         "sliding_window": {"--context-target-input-tokens", "--context-keep-observation-blocks",
                            "--context-min-recent-tool-images", "--context-image-eviction-batch-size"},
@@ -193,7 +194,20 @@ def resolve_context_config(args) -> dict:
     """Collect context policy settings independently of SDK selection."""
     policy = getattr(args, "context_policy", "identity")
 
-    options: dict[str, int] = {}
+    options: dict[str, Any] = {}
+    profile_name = getattr(args, 'context_robot_profile', None)
+    if profile_name is not None and policy != 'append_only_observation':
+        raise ValueError('context_robot_profile_requires_append_only_observation')
+    if policy == 'append_only_observation':
+        from uni_robot_agent.integrations import load_integration
+        from uni_robot_agent.context.robot_profile import require_profile
+        if not profile_name:
+            raise ValueError('explicit_robot_context_profile_required')
+        spec = load_integration(args.integration).get_integration_spec()
+        profile = spec.context_profiles.get(profile_name)
+        if profile is None or profile.integration != args.integration:
+            raise ValueError('unsupported_robot_context_profile_for_integration')
+        options['profile'] = require_profile(profile)
     if policy == 'append_only_observation' and getattr(args, 'context_max_input_tokens', None) is not None:
         raise ValueError('append_only_observation does not silently trim history')
     if policy == "sliding_window":
@@ -221,6 +235,13 @@ def resolve_context_config(args) -> dict:
             "image_token_allowance": args.context_image_token_allowance,
         }
     return {"context_policy": policy, "context_options": options}
+
+
+def validate_context_episode(args, episode):
+    """Validate the selected profile after connection, before SDK/model startup."""
+    profile = resolve_context_config(args)['context_options'].get('profile')
+    if profile is not None:
+        profile.validate_episode(getattr(episode, 'description', None))
 
 
 @dataclass(frozen=True)
@@ -266,6 +287,7 @@ class AgentConfig(BaseModel):
     provider_retry_backoff_s: int = Field(default=5, ge=0)
     model_parallel_tool_calls: bool = True
     context_policy: Literal["identity", "sliding_window", "observation_window", "append_only_observation"] = "identity"
+    context_robot_profile: str | None = None
     context_observation_horizon: int = Field(default=2, gt=0)
     context_image_token_allowance: int = Field(default=1536, gt=0)
     context_max_input_tokens: int | None = Field(default=None, gt=0)

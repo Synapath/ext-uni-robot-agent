@@ -6,6 +6,10 @@ the harness schedules tools, executes them and returns feedback. Environment,
 action-model and perception services run independently, with their native dependencies.
 The Python package is `uni_robot_agent`; the CLI is `uni-robot-agent`.
 
+Optional append-only visual context requires a declared robot profile. Concrete
+profile data belongs to the integration; shared context consumes its typed
+parameters and validates prepared descriptions. See [cache profile migration](cache-history.md#prepared-robot-profile-and-migration).
+
 ![uni-robot-agent architecture: agent backends, shared robot tools, independent services and native adapters](../assets/diagrams/uni-robot-agent-architecture.png)
 
 The diagram shows the shared tool and service implementation, with RoboUse and
@@ -331,6 +335,11 @@ and state versions describe evidence, not task completion.
 Codex can use the identity or sliding-window context policy. History transforms
 require an explicit provider URL. Claude Code uses its SDK's native model
 configuration and currently supports the identity context policy.
+
+An optional Responses [append-only text/current RGB policy](cache-history.md)
+preserves once-projected receipts, puts replaceable visuals at the end and
+prepares explicit 30-minute boundaries. It reuses ContextManager and the
+provider, without another SDK conversation or robot-state owner.
 
 ## Extending the agent
 

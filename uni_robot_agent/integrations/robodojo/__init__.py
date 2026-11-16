@@ -48,6 +48,8 @@ def get_integration_spec():
                               tool_profiles={"clean": CLEAN_TOOLS, "direct": DIRECT_TOOLS, "hybrid": HYBRID_TOOLS},
                               add_cli_args=add_cli_args, validate_cli=validate_cli, config_model=RobodojoOptions)
     spec.deployment_module = "uni_robot_agent.integrations.robodojo.deployment"
+    from .context_profile import ROBODOJO_X5_25HZ
+    spec.context_profiles = {ROBODOJO_X5_25HZ.name: ROBODOJO_X5_25HZ}
     return spec
 
 

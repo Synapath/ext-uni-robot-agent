@@ -93,6 +93,8 @@ def assemble_session(args) -> SessionAssembly:
             )
         )
         session.start()
+        from uni_robot_agent.config import validate_context_episode
+        validate_context_episode(args, session.episode)
 
         telemetry.annotate(
             integration=args.integration,

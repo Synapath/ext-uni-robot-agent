@@ -114,6 +114,21 @@ class ProviderBudgetChecks(unittest.TestCase):
         self.assertNotIn('secret',json.dumps(error_details(error)))
         self.assertIn({'errno':111},error_details(error)['cause_codes'])
 
+    def test_nested_sdk_paths_survive_real_result_writer(self):
+        from types import SimpleNamespace
+        from uni_robot_agent.config import public_config
+        from uni_robot_agent.artifacts.run import write_result_json
+        catalog=Path(self.tmp.name)/'catalog.json'
+        args=SimpleNamespace(codex_sdk_options={'model_catalog_json':catalog,'nested':[catalog]},
+                             _api_key='private-fixture',provider_url='https://user:private-fixture@example.test/v1?token=x')
+        config=public_config(args)
+        write_result_json(Path(self.tmp.name),{'task_success':True,'config':config})
+        saved=json.loads((Path(self.tmp.name)/'result.json').read_text())
+        self.assertEqual(saved['config']['codex_sdk_options']['model_catalog_json'],str(catalog))
+        self.assertEqual(saved['config']['codex_sdk_options']['nested'],[str(catalog)])
+        self.assertNotIn('private-fixture',json.dumps(saved))
+        self.assertIsInstance(args.codex_sdk_options['model_catalog_json'],Path)
+
     def test_fixed_exponential_and_capped_delays(self):
         self.assertEqual([RetryPolicy().delay(i) for i in range(5)],[1,2,4,8,8])
         policy=RetryPolicy(initial_delay_s=2,backoff_multiplier=1,max_delay_s=2)

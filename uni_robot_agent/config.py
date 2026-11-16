@@ -163,8 +163,17 @@ def resolve_settings(args, integration_spec, *, explicit=(), agent_enabled=True)
 def public_config(args) -> dict:
     from urllib.parse import urlsplit, urlunsplit
 
+    def json_value(value):
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, dict):
+            return {key: json_value(child) for key, child in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [json_value(child) for child in value]
+        return value
+
     result = {
-        k: str(v) if isinstance(v, Path) else v
+        k: json_value(v)
         for k, v in vars(args).items()
         if k not in {"print_config", "validate_config"} and not k.startswith("_")
     }

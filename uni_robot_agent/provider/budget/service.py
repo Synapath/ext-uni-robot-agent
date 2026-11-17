@@ -8,6 +8,7 @@ from uni_robot_agent.provider.gateway import ProviderGateway
 from uni_robot_agent.provider.protocols.messages import MessagesProtocol
 from uni_robot_agent.provider.protocols.responses import ResponsesProtocol
 from uni_robot_agent.provider.retry import RetryPolicy
+from uni_robot_agent.provider.transport import ModelRequestCancelled
 from .core import Stop, read_private_key
 
 
@@ -48,10 +49,16 @@ def serve_gate(gate, token, *, key_file=None, upstream_base_url=None,
             exchange = getattr(gate, '_exchange', None)
             if exchange is None:
                 exchange = {'provider_attempts': []}
-            status, response_headers, raw = gateway._client.send(
-                target=gateway._adapter.target_url(gateway._upstream_base_url, path),
-                request_bytes=json.dumps(body).encode(), headers=outgoing, exchange=exchange,
-            )
+            try:
+                status, response_headers, raw = gateway._client.send(
+                    target=gateway._adapter.target_url(gateway._upstream_base_url, path),
+                    request_bytes=json.dumps(body).encode(), headers=outgoing, exchange=exchange,
+                )
+            except ModelRequestCancelled:
+                # Keep a supervisor's durable stop; never clear unknown usage.
+                # Without an existing/expired stop, cancellation remains an error.
+                gate.ledger.check(gate.episode)
+                raise
             return status, response_headers, raw
         gate.forward = forward
     endpoint = gateway.start()

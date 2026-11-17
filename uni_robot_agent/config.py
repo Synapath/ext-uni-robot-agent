@@ -133,8 +133,8 @@ def resolve_settings(args, integration_spec, *, explicit=(), agent_enabled=True)
         from uni_robot_agent.provider.registry import validate_provider_profile
         args.provider_profile = args.provider_profile or f"passthrough.{agent_backend.model_protocol}"
         validate_provider_profile(args.provider_profile, client_protocol=agent_backend.model_protocol)
-        if args.context_policy == 'append_only_observation' and agent_backend.model_protocol != 'responses':
-            raise ValueError('append_only_observation requires native Responses')
+        if args.context_policy == 'append_only_observation' and agent_backend.model_protocol not in ('responses', 'messages'):
+            raise ValueError('append_only_observation requires native Responses or Messages')
         agent_backend.validate_config(args, explicit)
         if args.context_policy != "identity" and not args.provider_url:
             raise ValueError(

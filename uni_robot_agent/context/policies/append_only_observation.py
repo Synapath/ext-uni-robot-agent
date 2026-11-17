@@ -57,6 +57,7 @@ def mark(item):
 class AppendOnlyObservationPolicy:
     """One instance per ContextManager/session; no hardware or model queries."""
     name, version = 'append_only_observation', '2'
+    wire_formats = ('responses', 'messages')
 
     def __init__(self, *, profile=None):
         self.profile = require_profile(profile)
@@ -66,6 +67,7 @@ class AppendOnlyObservationPolicy:
         self._header = None
         self._head = None
         self._lock = threading.RLock()
+        self._messages = None
 
     @property
     def options(self):
@@ -74,6 +76,11 @@ class AppendOnlyObservationPolicy:
 
     def select(self, request):
         with self._lock:
+            if request.wire_format == 'messages':
+                if self._messages is None:
+                    from .append_only_messages import AppendOnlyMessagesPolicy
+                    self._messages = AppendOnlyMessagesPolicy(profile=self.profile)
+                return self._messages.select(request)
             return self._select(request)
 
     def _select(self, request):

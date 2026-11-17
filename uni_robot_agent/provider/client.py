@@ -206,7 +206,7 @@ class ModelClient:
                     **options,
                 )
             except Exception as exc:
-                cancelled_response = exc.response if isinstance(exc, ModelRequestCancelled) else None
+                cancelled_response = exc.response if isinstance(exc, (ModelRequestCancelled, HttpCallError)) else None
                 attempts.append(
                     {
                         "attempt": attempt + 1,

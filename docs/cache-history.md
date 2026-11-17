@@ -1,10 +1,12 @@
 # Append-only text and current RGB caching
 
 `context_policy="append_only_observation"` is an optional native Responses
-policy, version2. It requires an explicit integration-declared robot profile.
+policy, version2, with a separate native Messages adapter described below.
+It requires an explicit integration-declared robot profile.
 Existing identity/window policies, robot control, scoring and physical
-limits keep their defaults. The prepared consumer uses Sol/high; this policy
-does not implement Messages/Claude caching.
+limits keep their defaults. Responses/Sol and Messages/Fable have separate
+prepared cache and admission contracts; their TTLs and thinking semantics are
+not interchangeable.
 
 One ContextManager owns one policy instance per session:
 
@@ -57,8 +59,8 @@ The only integration-declared profile currently prepared is
 `robodojo_x5_25hz_v1`: RoboDojo, left/right X5 arms, `x5_grasp_site`, world-frame
 metres, fixed XYZ radians, measured opening in metres,25Hz and
 head/left_wrist/right_wrist. This does not prepare Piper-X or another robot,
-enable depth/object truth, or add Messages/Claude caching. Sol explicit30m
-validation remains a separate provider/billing contract.
+enable depth/object truth, or prepare another provider's cache contract.
+Sol explicit30m validation remains separate from the Messages5m contract below.
 
 ```python
 from uni_robot_agent import AgentConfig
@@ -94,6 +96,67 @@ Version1 protocols and source pins are historical and remain unchanged; replay
 them with their frozen source. New protocols must select the profile and pin the
 new source. Direct helper callers must now pass `profile=...`; clock helpers
 require `control_hz=...`. There is no silent compatibility fallback to X5.
+
+## Native Messages
+
+The explicit profile also supports native Messages via the same
+`append_only_observation` policy. User observations reuse the shared projection;
+assistant text, thinking signatures, tool IDs and inline system messages stay
+native. Equivalent SDK string/list text forms are canonicalized; previously
+recorded images pruned by the CLI are restored from the frozen local history,
+then projected again. Other history/header changes fail before count/generation. The
+fixed task and last two tool receipts use explicit ephemeral5m cache controls;
+the current RGB/calibration tail is never marked. Hits refresh this lifetime.
+The dynamic RGB user message precedes any native trailing system directives:
+nonempty inline system messages must precede an assistant or end the array.
+Removing the dynamic observation still leaves exactly the append-only native
+text chronology; no synthetic assistant or rewritten system text is inserted.
+Fable5.2 binds private thinking signatures to the entire earlier visual prefix.
+Current-only RGB therefore opts into the official
+`thinking.block_binding.prefix_mismatch_behavior="drop_block"` control and its
+beta header, consistently for count/generation. The provider may omit invalid
+private thinking; signed wire blocks, visible intents and tool receipts remain
+archived unchanged. Capture response `input_transformations`; do not claim full
+private-reasoning retention or guaranteed cache hits. Ordinary policies do not
+enable this option. See the
+[provider contract](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/prefix-checks).
+
+### Private-thinking retention is a separate contract
+
+Append-only visible text is not an append-only full Messages conversation.
+Moving/replacing the current RGB tail changes content that preceded visual
+thinking when it was generated. Its signed blocks remain unchanged on the
+recorded wire, but the provider can reject their binding and drop them before
+inference. Keeping the signature bytes does not preserve their usable reasoning.
+
+This is an explicit compatibility tradeoff of the current-only RGB policy,
+not a claim of efficient private-thinking reuse. An input cache hit measures
+reused input tokens; it does not show that private thinking survived. Report
+`input_transformations` per request, unique dropped paths separately from
+cumulative drop events, new output/thinking usage and actual completion.
+Repeatedly reporting the same dropped block is not another generation or a
+second charge for its original output.
+
+Anthropic documents that dropped thinking can cause the model to reconstruct
+reasoning, increasing output cost and latency; cache reuse after the first
+dropped block can also change. See
+[what dropping thinking costs](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/fix-bound-to-a-different-conversation#what-dropping-thinking-costs).
+Local SDK mocks cannot measure that quality/cost effect or validate vendor
+signature semantics. A controlled comparison must separate effort from history
+policy. Retaining immutable observation turns to preserve thinking is a future
+alternative that also retains old image input; it is not enabled here. Do not
+silently remove the binding control or change the existing visual policy.
+
+Responses30m controls are not translated onto the Messages wire. Native count
+requests remove only cache metadata, retaining identical text/images/schema.
+Use `CacheStableDirectFableBudgetGate(..., profile=...)` for independent trusted
+validation. Existing identity/observation-window behavior is unchanged.
+
+```bash
+PYTHONPATH=. python scripts/validation/messages_cache_history.py
+```
+
+See the [official caching contract](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
 
 ## Checks
 

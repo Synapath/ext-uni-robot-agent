@@ -45,6 +45,9 @@ def prepare_messages(body, limits):
         raise Stop('missing_messages')
     if body.get('thinking', {}).get('type', 'adaptive') != 'adaptive':
         raise Stop('adaptive_thinking_required')
+    from uni_robot_agent.context.policies.append_only_messages import BINDING_DROP
+    if body.get('thinking', {}).get('block_binding') not in (None, BINDING_DROP):
+        raise Stop('unprepared_thinking_binding')
     context=body.get('context_management')
     if context is not None and context != {'edits':[{'type':'clear_thinking_20251015','keep':'all'}]}:
         raise Stop('context_editing_disabled')
@@ -57,6 +60,10 @@ def prepare_messages(body, limits):
         raise Stop('unknown_messages_field')
     if set(body.get('output_config', {})) - {'effort'}:
         raise Stop('output_format_not_prepared')
+    for message in body['messages']:
+        if message.get('role') == 'system' and 'output_config' in message:
+            if message['output_config'] != {'effort': limits.effort}:
+                raise Stop('inline_effort_mismatch')
     for tool in body.get('tools', []):
         if (not isinstance(tool, dict) or tool.get('type', 'custom') != 'custom'
             or not tool.get('name', '').startswith(PREFIX)
@@ -76,7 +83,8 @@ def prepare_messages(body, limits):
     if not requested: raise Stop('invalid_max_tokens')
     result['max_tokens']=min(requested,limits.max_output_tokens)
     result['service_tier']='standard_only'
-    count={k:result[k] for k in ('model','messages','system','tools','thinking','tool_choice') if k in result}
+    from uni_robot_agent.context.policies.append_only_messages import without_cache_control
+    count=without_cache_control({k:result[k] for k in ('model','messages','system','tools','thinking','tool_choice') if k in result})
     return result,count
 
 
@@ -135,6 +143,10 @@ class MessagesBudgetGate(BudgetGate):
         selected={k.lower():v for k,v in headers.items() if k.lower() in {'anthropic-version','anthropic-beta'}}
         if 'fast-mode' in selected.get('anthropic-beta',''):
             raise Stop('fast_mode_disabled')
+        from uni_robot_agent.context.policies.append_only_messages import BINDING_DROP,BINDING_BETA
+        if body.get('thinking', {}).get('block_binding') == BINDING_DROP:
+            betas=[b.strip() for b in selected.get('anthropic-beta','').split(',') if b.strip()]
+            selected['anthropic-beta']=','.join(dict.fromkeys([*betas,BINDING_BETA]))
         return self.forward(path,body,selected)
 
     def complete(self,raw):
@@ -163,3 +175,26 @@ class DirectFableLimits(FableLimits):
         super().__post_init__()
         if self.control_mode != 'direct_sync':
             raise ValueError('Direct Messages requires the direct_sync tool profile')
+
+
+class CacheStableDirectFableBudgetGate(MessagesBudgetGate):
+    """Trusted native Messages history/cache verification before count or spend."""
+    def __init__(self, ledger, episode, forward, *, profile=None):
+        from uni_robot_agent.context.robot_profile import require_profile
+        self.profile = require_profile(profile)
+        super().__init__(ledger, episode, forward)
+
+    def prepare(self, body):
+        from uni_robot_agent.context.policies.append_only_observation import fingerprint
+        from uni_robot_agent.context.policies.append_only_messages import (
+            HEADER_KEYS, persistent_messages, validate_messages_effective, without_cache_control)
+        validate_messages_effective(body, profile=self.profile)
+        prepared, count = super().prepare(body)
+        hashes = [fingerprint(m) for m in persistent_messages(prepared)]
+        previous = getattr(self, '_stable_text', [])
+        clean = without_cache_control(prepared)
+        header = fingerprint({k: clean.get(k) for k in HEADER_KEYS})
+        if hashes[:len(previous)] != previous or getattr(self, '_stable_header', header) != header:
+            raise Stop('trusted_append_only_messages_history_changed')
+        self._stable_text, self._stable_header = hashes, header
+        return prepared, count

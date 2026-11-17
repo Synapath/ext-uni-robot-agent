@@ -141,3 +141,18 @@ actions and completion remain in programs. Cancellation revokes new calls throug
 either entry, and completion
 requires its executed finish receipt plus normal SDK termination. See
 [Code as Policy](code-as-policy.md) for the program API and lifecycle.
+
+## Cooperative Claude cancellation
+
+`Session.cancel(reason="interrupted")` preserves an explicit supervisor reason,
+for example `wall_time_limit`, through the adapter and native finalization.
+Existing zero-argument calls retain their default. Claude cancellation is
+idempotent: the first reason wins, and repeated stop notifications do not cancel
+cleanup again. Its adapter uses an AnyIO cancellation scope, including the SDK
+wall timeout. Raw `asyncio.Task.cancel()`/`asyncio.timeout()` bypass the pinned
+Claude SDK's shielded subprocess cleanup; do not use them to supervise this
+adapter. The caller still owns an independent bounded process cleanup fallback.
+
+A trusted provider cancellation after a durable ledger stop retains that stop
+reason and any unknown usage reservation. Cancellation without an existing stop
+continues to be a provider failure; earlier HTTP/transport errors remain visible.

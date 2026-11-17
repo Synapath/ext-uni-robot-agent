@@ -87,6 +87,27 @@ class ProviderBudgetChecks(unittest.TestCase):
             with self.assertRaises(HttpCallError):self.send('/responses',{})
             self.assertEqual(send.call_count,1)
 
+    def test_http_rejection_keeps_status_and_redacted_vendor_diagnostics(self):
+        response=httpx.Response(400,json={'error':{'type':'invalid_request_error',
+            'message':'Unsupported cache field; sk-private-example must stay private'}},request=httpx.Request('POST','http://localhost'))
+        from uni_robot_agent.services.errors import HttpCallError
+        with patch('uni_robot_agent.provider.client._send_provider_request',side_effect=HttpCallError(response)) as send:
+            with self.assertRaises(HttpCallError):self.send('/messages',{})
+        self.assertEqual(send.call_count,1)
+        self.assertEqual(self.events[-1]['status'],400)
+        self.assertEqual(self.events[-1]['provider_error_type'],'invalid_request_error')
+        self.assertNotIn('sk-private-example',json.dumps(self.events))
+        self.assertIn('[redacted]',self.events[-1]['provider_error_message'])
+
+    def test_gate_http_rejection_keeps_reservation_and_does_not_retry(self):
+        from uni_robot_agent.services.errors import HttpCallError
+        error=HttpCallError(httpx.Response(400,json={'error':{'type':'invalid_request_error','message':'fixture'}},
+            request=httpx.Request('POST','http://localhost')))
+        gate,calls,mock=self.gate(lambda path,n:error if n==2 else None)
+        with mock,self.assertRaisesRegex(Stop,'upstream_http_400'):gate.handle(self.body())
+        self.assertEqual(len(calls),2)
+        self.assertGreater(self.ledger.snapshot()['unsettled_reserved_usd'],0)
+
     def test_cancel_interrupts_wait(self):
         self.client._retry_policy=RetryPolicy(initial_delay_s=5,max_delay_s=5)
         entered=threading.Event();errors=[]

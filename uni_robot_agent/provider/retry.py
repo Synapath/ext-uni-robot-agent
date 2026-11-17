@@ -40,7 +40,25 @@ def error_details(error):
             if type(value) is int:
                 codes.append({name: value})
         current = current.__cause__ or current.__context__
-    return {'error_type': type(error).__name__, 'cause_types': chain, 'cause_codes': codes}
+    details = {'error_type': type(error).__name__, 'cause_types': chain, 'cause_codes': codes}
+    # An HTTP rejection is not an uncertain socket failure. Preserve bounded
+    # vendor diagnostics, never arbitrary exception text or authentication data.
+    from uni_robot_agent.services.errors import HttpCallError
+    if isinstance(error, HttpCallError):
+        import re
+        details['http_status'] = error.status
+        try:
+            payload = json.loads(error.content).get('error', {})
+            kind, message = payload.get('type'), payload.get('message')
+        except (ValueError, AttributeError, TypeError):
+            kind = message = None
+        if isinstance(kind, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', kind):
+            details['provider_error_type'] = kind
+        if isinstance(message, str):
+            message = re.sub(r'sk-[a-zA-Z0-9_-]+', '[redacted]', message)
+            message = re.sub(r'(?i)(bearer|x-api-key|authorization)\s*[:= ]\s*\S+', '[redacted]', message)
+            details['provider_error_message'] = message[:600]
+    return details
 
 
 

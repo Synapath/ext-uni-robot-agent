@@ -1,10 +1,12 @@
 # Append-only text and current RGB caching
 
 `context_policy="append_only_observation"` is an optional native Responses
-policy, version2. It requires an explicit integration-declared robot profile.
+policy, version2, with a separate native Messages adapter described below.
+It requires an explicit integration-declared robot profile.
 Existing identity/window policies, robot control, scoring and physical
-limits keep their defaults. The prepared consumer uses Sol/high; this policy
-does not implement Messages/Claude caching.
+limits keep their defaults. Responses/Sol and Messages/Fable have separate
+prepared cache and admission contracts; their TTLs and thinking semantics are
+not interchangeable.
 
 One ContextManager owns one policy instance per session:
 
@@ -57,8 +59,8 @@ The only integration-declared profile currently prepared is
 `robodojo_x5_25hz_v1`: RoboDojo, left/right X5 arms, `x5_grasp_site`, world-frame
 metres, fixed XYZ radians, measured opening in metres,25Hz and
 head/left_wrist/right_wrist. This does not prepare Piper-X or another robot,
-enable depth/object truth, or add Messages/Claude caching. Sol explicit30m
-validation remains a separate provider/billing contract.
+enable depth/object truth, or prepare another provider's cache contract.
+Sol explicit30m validation remains separate from the Messages5m contract below.
 
 ```python
 from uni_robot_agent import AgentConfig
@@ -118,6 +120,33 @@ archived unchanged. Capture response `input_transformations`; do not claim full
 private-reasoning retention or guaranteed cache hits. Ordinary policies do not
 enable this option. See the
 [provider contract](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/prefix-checks).
+
+### Private-thinking retention is a separate contract
+
+Append-only visible text is not an append-only full Messages conversation.
+Moving/replacing the current RGB tail changes content that preceded visual
+thinking when it was generated. Its signed blocks remain unchanged on the
+recorded wire, but the provider can reject their binding and drop them before
+inference. Keeping the signature bytes does not preserve their usable reasoning.
+
+This is an explicit compatibility tradeoff of the current-only RGB policy,
+not a claim of efficient private-thinking reuse. An input cache hit measures
+reused input tokens; it does not show that private thinking survived. Report
+`input_transformations` per request, unique dropped paths separately from
+cumulative drop events, new output/thinking usage and actual completion.
+Repeatedly reporting the same dropped block is not another generation or a
+second charge for its original output.
+
+Anthropic documents that dropped thinking can cause the model to reconstruct
+reasoning, increasing output cost and latency; cache reuse after the first
+dropped block can also change. See
+[what dropping thinking costs](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/fix-bound-to-a-different-conversation#what-dropping-thinking-costs).
+Local SDK mocks cannot measure that quality/cost effect or validate vendor
+signature semantics. A controlled comparison must separate effort from history
+policy. Retaining immutable observation turns to preserve thinking is a future
+alternative that also retains old image input; it is not enabled here. Do not
+silently remove the binding control or change the existing visual policy.
+
 Responses30m controls are not translated onto the Messages wire. Native count
 requests remove only cache metadata, retaining identical text/images/schema.
 Use `CacheStableDirectFableBudgetGate(..., profile=...)` for independent trusted

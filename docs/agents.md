@@ -80,6 +80,14 @@ encoding. DeepSeek Files preparation remains scoped to the model client.
 Complete responses are buffered before retry/delivery; tool batches commit
 only after the final response send, and failed delivery revokes them.
 
+The bounded Direct Responses profile accepts `gpt-6.2-sol` with `high` effort
+and explicit 30-minute caching. Its append-only context policy places fixed
+instructions in the first developer message because GPT‑6.2 applies the
+top-level `instructions` after the input. Completed text tool history follows
+the fixed prefix and the latest synchronized RGB group remains at the tail.
+Token counting uses the same context without cache markers. GPT‑6.1 Sol keeps
+the existing top-level instruction layout.
+
 ## Claude Code
 
 Select `--agent claude_code --model <provider-model>` and supply

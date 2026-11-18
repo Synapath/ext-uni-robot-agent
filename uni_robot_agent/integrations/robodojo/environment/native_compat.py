@@ -8,6 +8,7 @@ Replace only its reset-only client during construction; never implement actor ca
 from pathlib import Path
 import subprocess
 
+CAPTURE_COMMIT = "1cac4202bfe22e76861700cefc9cf5dd1779e827"
 NATIVE_COMMIT = "ee67a1468510da7624a089164402359f2afc72c8"
 # This per-call target-span guard is not a hardware limit or collision-free guarantee.
 MAX_IK_JOINT_DELTA_RAD = 1.0
@@ -40,7 +41,7 @@ def reset_episode(env, layout, *, seed=0, slot=0):
         raise RuntimeError('Native RoboDojo reset seed differs from the requested seed')
 
 
-def create_native(task, app, output, *, root, seed=0):
+def create_native(task, app, output, *, root, seed=0, layout_set=0):
     import yaml
     from omegaconf import OmegaConf
     from src.eval_client import eval_env
@@ -61,7 +62,7 @@ def create_native(task, app, output, *, root, seed=0):
         eval_batch=False,
         policy_name="direct",
         additional_info="uni_robot_agent",
-        seed=0,
+        seed=layout_set,
         eval_num=1,
         physx_monitor_enabled=True,
     )
@@ -78,8 +79,8 @@ def create_native(task, app, output, *, root, seed=0):
     cfg = process_randomization(cfg)
     cfg, _ = process_config(cfg, task_name=task)
     cfg.sim.scene.num_envs = 1
-    # eval_cfg.seed selects the asset layout directory and remains zero. The
-    # simulator RNG seed is independent; Adapter supplies the exact layout.
+    # The evaluator layout set and simulator RNG seed are independent.
+    # Adapter supplies the exact layout file.
     cfg.sim.seed = [seed]
     cfg.camera.default_frequency = 25
     cfg.eval_cfg.observation.collect_freq = 25
@@ -140,7 +141,7 @@ def native_call(env, operation, *, allow_released=False):
     return operation(env)
 
 
-def resolve_native_root(root):
+def resolve_native_root(root, *, continuous_recording=False):
     """Accept only the pinned, unmodified official checkout and its submodules."""
     if root is None:
         raise ValueError("--native-root must point to the official RoboDojo checkout")
@@ -155,8 +156,9 @@ def resolve_native_root(root):
 
     if Path(git("rev-parse", "--show-toplevel")).resolve() != root:
         raise ValueError("--native-root must be the RoboDojo Git checkout root")
-    if git("rev-parse", "HEAD") != NATIVE_COMMIT:
-        raise ValueError(f"Official RoboDojo requires commit {NATIVE_COMMIT}")
+    expected = CAPTURE_COMMIT if continuous_recording else NATIVE_COMMIT
+    if git("rev-parse", "HEAD") != expected:
+        raise ValueError(f"RoboDojo requires commit {expected} for the selected capture mode")
     git("diff", "--quiet", "HEAD", "--ignore-submodules=none")
     if git("ls-files", "--others", "--exclude-standard", "--", "*.py"):
         raise ValueError("Official RoboDojo contains untracked Python sources")

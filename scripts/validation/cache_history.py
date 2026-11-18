@@ -62,6 +62,29 @@ def body(items=None):
 
 
 class CacheHistoryChecks(unittest.TestCase):
+    def test_gpt62_stable_developer_prefix_and_cache_count_request(self):
+        policy = AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ)
+        raw = body() | {'model': 'gpt-6.2-sol'}
+        first = policy.select(ContextRequest(raw))
+        first_body = first.request.body
+        self.assertNotIn('instructions', first_body)
+        head = first_body['input'][0]
+        self.assertEqual(head['role'], 'developer')
+        self.assertIn('Fixed robot instructions.', head['content'][0]['text'])
+        self.assertEqual(first.options['cache_boundaries'], [1])
+        self.assertIn('prompt_cache_breakpoint', first_body['input'][1]['content'][-1])
+
+        raw['input'].extend(pair(1))
+        second = policy.select(ContextRequest(raw)).request.body
+        self.assertEqual(second['input'][0], head)
+        generated, count = prepare_request(second, DirectSolLimits(model='gpt-6.2-sol'))
+        self.assertEqual(generated['input'], second['input'])
+        self.assertEqual(count['input'], without_cache_markers(generated['input']))
+        bad = deepcopy(second)
+        bad['instructions'] = 'Late instructions.'
+        with self.assertRaisesRegex(ValueError, 'stable_developer_message_required'):
+            validate_effective_request(bad, profile=ROBODOJO_X5_25HZ)
+
     def test_forty_turns_append_only_current_rgb_and_previous_boundary(self):
         policy = AppendOnlyObservationPolicy(profile=ROBODOJO_X5_25HZ); raw = body(); previous = []
         for i in range(41):

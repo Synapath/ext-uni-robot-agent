@@ -17,7 +17,7 @@ class SolLimits(Limits):
 
     def __post_init__(self):
         super().__post_init__()
-        if self.model != 'gpt-6.1-sol' or self.effort != 'high':
+        if self.model not in {'gpt-6.1-sol', 'gpt-6.2-sol'} or self.effort != 'high':
             raise ValueError('Only frozen Sol/high is prepared')
         if (Decimal(self.input_usd_per_million) < Decimal('5.5')
                 or Decimal(self.output_usd_per_million) < 11

@@ -18,7 +18,7 @@ def validate_cache(body):
     visit(body.get('input', []))
     options = body.get('prompt_cache_options')
     if options is None and not markers: return
-    if (body.get('model') != 'gpt-6.1-sol' or options != {'mode': 'explicit', 'ttl': '30m'}
+    if (body.get('model') not in {'gpt-6.1-sol', 'gpt-6.2-sol'} or options != {'mode': 'explicit', 'ttl': '30m'}
             or not 1 <= len(markers) <= 3):
         raise Stop('unprepared_cache_policy')
 

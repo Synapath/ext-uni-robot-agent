@@ -119,6 +119,18 @@ task requirements; it is enabled by default for RoboDojo and loads the simplifie
 clarify the task instruction, including the required sequence.
 The full `task_requirements.json` remains a separate reference resource.
 
+For an external runtime, `DeploymentConfig` can opt into `continuous_recording=True`
+with the pinned RoboDojo capture revision `1cac4202bfe22e76861700cefc9cf5dd1779e827`.
+This starts strict camera capture after reset and flushes it on native finalization.
+The recording contains the reset frame and each executed native step. The default
+deployment uses its existing native revision and recording behavior.
+
+`layout_set` selects the evaluator layout directory independently of the simulator
+RNG `seed`. Fixture deployments can also pin the exact layout file and its SHA-256.
+When a caller supplies the layout set, readiness verifies the value reported by
+the native evaluator. The native server accepts `--layout-set` and
+`--continuous-recording` for these options.
+
 ### Realistic observation settings
 
 The paper's **Realistic** principle excludes simulator-provided depth and

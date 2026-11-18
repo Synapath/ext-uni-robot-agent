@@ -217,6 +217,8 @@ class DeploymentConfig(RuntimeConfig):
     shutdown_timeout_s: float = Field(default=30, gt=0, allow_inf_nan=False)
     layout: Path | None = None
     layout_sha256: str | None = None
+    layout_set: int | None = Field(default=None, ge=0)
+    continuous_recording: bool = False
     task_dir: Path | None = None
     seed: int | None = None
     cameras: list[str] | None = None

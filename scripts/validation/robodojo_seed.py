@@ -6,6 +6,7 @@ import unittest
 
 from uni_robot_agent.integrations.robodojo.environment.native_compat import reset_episode, validate_seed
 from uni_robot_agent.integrations.robodojo import deployment
+from uni_robot_agent.services.deployment.config import DeploymentConfig
 
 
 class SeedChecks(unittest.TestCase):
@@ -49,6 +50,27 @@ class SeedChecks(unittest.TestCase):
                 self.assertIn('--seed', plan.command)
                 self.assertEqual(plan.command[plan.command.index('--seed')+1],str(seed or 0))
                 self.assertIn(str(layout),plan.command)
+                self.assertNotIn('--layout-set', plan.command)
+                self.assertNotIn('--continuous-recording', plan.command)
+
+    def test_continuous_runtime_keeps_layout_set_and_seed_independent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root/'task/RoboDojo/config/general_pickup.yml'
+            config_path.parent.mkdir(parents=True)
+            config_path.touch()
+            layout = root/'layout.json'
+            layout.write_text('{}')
+            args = DeploymentConfig(integration='robodojo', task='general_pickup',
+                layout=layout, layout_set=2, seed=7, continuous_recording=True).resolve()
+            runtime = SimpleNamespace(python='python', environment={},
+                                      data={'native_root': str(root), 'assets_dir': str(root)})
+            plan = deployment.plan(args, runtime, root, 'test')
+            self.assertIn('--continuous-recording', plan.command)
+            self.assertEqual(plan.command[plan.command.index('--layout-set')+1], '2')
+            self.assertEqual(plan.command[plan.command.index('--seed')+1], '7')
+            self.assertEqual(plan.expected['metadata.layout_set'], 2)
+            self.assertEqual(plan.expected['metadata.seed'], 7)
 
 
 if __name__ == '__main__':

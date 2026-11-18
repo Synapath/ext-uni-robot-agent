@@ -87,6 +87,7 @@ def _serve(adapter, args, app, *, integration="robodojo"):
     info = EpisodeInfo(episode_id=args.run_id, task=args.task, environment=owner.description,
                        integration=integration, capabilities=["motion", "capture", "joint_prefix", "preview"],
                        metadata={"task_id": args.task, "seed": args.seed,
+                                 "layout_set": int(adapter.env.eval_seed),
                                  "native_reset_seed": adapter.env.get_env_seed(adapter.slot),
                                  "layout": str(args.layout),
                                  "layout_sha256": args.layout_sha256,
@@ -139,6 +140,8 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
     parser.add_argument("--task", required=True)
     parser.add_argument("--layout", type=Path, required=True)
     parser.add_argument("--layout-sha256", required=True)
+    parser.add_argument("--layout-set", type=int, default=0)
+    parser.add_argument("--continuous-recording", action="store_true")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--seed", type=int, default=0,
@@ -171,9 +174,12 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
     if args.no_camera_calibration and not args.no_depth:
         parser.error("--no-camera-calibration requires --no-depth")
     try:
-        native_root = runtime.resolve_native_root(args.native_root)
+        root_options = {"continuous_recording": True} if args.continuous_recording else {}
+        native_root = runtime.resolve_native_root(args.native_root, **root_options)
     except (ValueError, OSError) as error:
         parser.error(str(error))
+    if args.layout_set < 0:
+        parser.error("--layout-set must be nonnegative")
     args.layout = args.layout.expanduser().resolve()
     args.output_dir = args.output_dir.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -196,6 +202,9 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
         "/log/file": "kit.log",
     }
     kit_args = " ".join(f"--{key}={kit / value}" for key, value in settings.items())
+    if args.continuous_recording:
+        from env.camera_manager.capture.render_sync import zero_delay_kit_args
+        kit_args += " " + zero_delay_kit_args()
     app = None
     adapter = None
     try:
@@ -203,13 +212,22 @@ def main(argv=None, *, integration="robodojo", runtime=native_compat):
         from src.eval_client.physx_warning_monitor import get_monitor
 
         get_monitor().start(enabled=True)
-        native = runtime.create_native(args.task, app, args.output_dir, root=native_root, seed=args.seed)
+        native_options = {"root": native_root, "seed": args.seed}
+        if args.layout_set:
+            native_options["layout_set"] = args.layout_set
+        native = runtime.create_native(args.task, app, args.output_dir, **native_options)
+        if args.continuous_recording and (
+            int(native.eval_seed) != args.layout_set or list(native.env_seed_list) != [args.seed]
+        ):
+            raise ValueError("Native RoboDojo configuration disagrees with the layout set or simulator seed")
         adapter = runtime.create_adapter(native, args.output_dir, args.layout, args.layout_sha256,
                           episode_id=args.run_id, ik_joint_delta_guard=args.ik_joint_delta_guard, depth_enabled=not args.no_depth,
                           calibration_enabled=not args.no_camera_calibration,
                           rgb_history_seconds=args.rgb_history_seconds, rgb_history_hz=args.rgb_history_hz,
                           direct_sim_seconds=args.direct_sim_seconds, direct_wall_seconds=args.direct_wall_seconds,
                           seed=args.seed)
+        if args.continuous_recording:
+            adapter.recording_path = args.output_dir / "recording.jsonl"
         _serve(adapter, args, app, integration=integration)
     except BaseException:
         (args.output_dir / "server_error.txt").write_text(traceback.format_exc())

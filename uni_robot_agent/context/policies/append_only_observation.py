@@ -193,6 +193,12 @@ class AppendOnlyObservationPolicy:
                 content.extend([{'type': 'input_text', 'text': '[RUA CURRENT LOCALIZATION OVERLAY]'+
                                  ('\n'+image['transport'] if image['transport'] else '')}, image['image']])
             effective['input'].append({'type': 'message', 'role': 'user', 'content': content})
+        if effective.get('model') == 'gpt-6.2-sol':
+            # GPT-6.2 appends the instructions field after input. Place the
+            # stable instruction in the first input item for prefix reuse.
+            effective['input'].insert(0, {'type': 'message', 'role': 'developer',
+                'content': [{'type': 'input_text', 'text': effective.pop('instructions')}]})
+            boundaries = [index + 1 for index in boundaries]
         effective = restore_selected(effective)
         validate_effective_request(effective, profile=self.profile)
         before, after = estimate_context(body), estimate_context(effective)
@@ -212,7 +218,13 @@ def validate_effective_request(body, *, profile):
     from uni_robot_agent.context.image_transport import has_references
     profile = require_profile(profile)
     cameras = profile.cameras
-    if profile.instruction() not in body.get('instructions', ''):
+    instruction = body.get('instructions', '')
+    if body.get('model') == 'gpt-6.2-sol':
+        head = next(iter(body['input']), {})
+        if head.get('role') != 'developer' or instruction:
+            raise ValueError('stable_developer_message_required')
+        instruction = '\n'.join(p.get('text', '') for p in head.get('content', []))
+    if profile.instruction() not in instruction:
         raise ValueError('robot_context_profile_header_missing')
     if has_references(body):
         raise ValueError('selected_images_not_restored')

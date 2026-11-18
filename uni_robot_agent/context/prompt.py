@@ -93,6 +93,7 @@ def assemble_prompt(
         raise ValueError(f"Invalid resource scheduling: {context.resource_scheduling}")
     if context.interaction_mode not in {"tool_calling", "code_as_policy"}:
         raise ValueError(f"Invalid interaction mode: {context.interaction_mode}")
+    prompt = _append_resource(prompt, prompts / "runtime" / "process_control.md")
     resources = ("code_as_policy.md",) if context.interaction_mode == "code_as_policy" else (
         "tool_calling.md", "batch.md", f"resource_{context.resource_scheduling}.md", f"return_{context.tool_return_mode}.md",
     )

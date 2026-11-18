@@ -29,6 +29,20 @@ absolute interpreter paths or commands that change PATH can still bypass this
 selection. Without the option, existing SDK environment behavior is unchanged.
 This setting requires the Codex backend; Claude Code rejects it.
 
+## Local computation cancellation
+
+Every tool profile, including Clean and Code as Policy, receives the shared
+`runtime/process_control.md` guidance. Cancel local calculations through their
+exact terminal session/job handle, or a recorded PID verified to belong to that
+calculation. Broad process-name matches and signals to shared process groups,
+harness services or other tasks are prohibited. Cancelling a calculation does
+not establish that already-submitted robot actions stopped.
+
+This is model guidance, not operating-system process isolation. It does not
+change native shell availability, SDK sandbox settings or process permissions.
+Deployments sharing a host must enforce their required process boundary in the
+launcher or container configuration; a working directory is not such a boundary.
+
 ## Adding an agent
 
 1. Add a package under `agents/<name>/` with `__init__.py`.

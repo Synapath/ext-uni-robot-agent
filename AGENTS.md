@@ -58,6 +58,9 @@ families are examples of this architecture, not a closed list of allowed tools.
 
 ## Compatibility and validation
 
+- The root `tests/` directory is local-only and ignored. Keep validation files
+  there untracked; never use `git add -f` or remove the ignore rule to commit them.
+
 - Intentional behavior changes are welcome: document the new contract, affected
   users and any migration, then update tests/docs. For a behavior-preserving
   refactor, compare tool schemas/visibility, prompts, feedback, defaults, budgets,

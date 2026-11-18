@@ -26,7 +26,8 @@ def external_data(args):
         raise ValueError('An external RoboDojo runtime requires --native-root')
     native = args.native_root.expanduser().resolve()
     assets = (args.assets_dir or native / 'Assets').expanduser().resolve()
-    return dict(native_root=str(native), assets_dir=str(assets))
+    return dict(native_root=str(native), assets_dir=str(assets),
+                continuous_recording=getattr(args, "continuous_recording", False))
 
 
 def prepare(context):
@@ -78,9 +79,11 @@ def prepare(context):
 
 def verify(runtime):
     from .assets import verify_robot_configs
+    from .environment.native_compat import resolve_native_root
     info = check_python(runtime.python, ['scipy', 'trimesh', 'sklearn', 'h5py', 'omegaconf', 'hydra'],
                         environment=runtime.environment)
     native, assets = Path(runtime.data['native_root']), Path(runtime.data['assets_dir'])
+    resolve_native_root(native, continuous_recording=runtime.data.get('continuous_recording', False))
     if (native / 'Assets').resolve() != assets.resolve():
         raise ValueError('The official checkout must resolve Assets to the prepared assets')
     for directory in ('Robots', 'Object', 'Material', 'Eval_Layout'):
@@ -88,9 +91,8 @@ def verify(runtime):
             raise ValueError(f'Missing RoboDojo asset directory: {assets / directory}')
     verify_robot_configs(assets)
     code = ('import hashlib,json,sys,importlib.util; from pathlib import Path; '
-            'from uni_robot_agent.integrations.robodojo.environment.native_compat import resolve_native_root; '
             'from uni_robot_agent.integrations.robodojo.environment.gripper_geometry import AUDITED_ASSETS; '
-            'root=resolve_native_root(Path(sys.argv[1])); '
+            'root=Path(sys.argv[1]); '
             'robot=root/"Assets/Robots/x5"; '
             'invalid=[name for name,values in AUDITED_ASSETS.items() '
             'if hashlib.sha256((robot/name).read_bytes()).hexdigest() not in values]; '
@@ -125,6 +127,11 @@ def plan(args, runtime, output, run_id):
     command = [runtime.python, '-m', 'uni_robot_agent.integrations.robodojo.environment.server',
         '--native-root', str(native), '--task', task, '--layout', str(layout), '--layout-sha256', digest,
         '--output-dir', str(output / 'environment'), '--run-id', run_id, '--host', args.host, '--port', str(port)]
+    layout_set = getattr(args, 'layout_set', None)
+    if layout_set is not None:
+        command.extend(['--layout-set', str(layout_set)])
+    if getattr(args, 'continuous_recording', False):
+        command.append('--continuous-recording')
     seed = 0 if getattr(args, 'seed', None) is None else args.seed
     command.extend(['--seed', str(seed)])
     if getattr(args, 'rua_source_root', None):
@@ -148,4 +155,6 @@ def plan(args, runtime, output, run_id):
     return LaunchPlan(tuple(command), f'http://{connect_host}:{port}',
                       {'integration': 'robodojo', 'episode_id': run_id, 'task': task,
                        'environment.metadata.layout_sha256': digest,
-                       'metadata.seed': seed}, runtime.environment, output)
+                       'metadata.seed': seed,
+                       **({'metadata.layout_set': layout_set} if layout_set is not None else {})},
+                      runtime.environment, output)

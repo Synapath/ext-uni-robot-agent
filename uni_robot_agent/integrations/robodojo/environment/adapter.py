@@ -84,6 +84,7 @@ class Adapter:
         self.ik_joint_delta_guard = ik_joint_delta_guard
         self.depth_enabled = depth_enabled
         self.calibration_enabled = calibration_enabled
+        self.recording_path: Path | None = None
         self.started = self.sealed = self.closed = False
         self.stop_reason = self.finish_request = None
         self.physics_per_tick = round(1 / (25 * env.dt))
@@ -142,6 +143,8 @@ class Adapter:
                 self.env.get_score()
             if getattr(self.env, "interact", False) and hasattr(self.env, "query_support_arm_traj"):
                 self.env.query_support_arm_traj(env_idx=self.slot)
+        if self.recording_path is not None:
+            self.env.start_continuous_recording(str(self.recording_path))
         self.gripper_limits = self._gripper_limits()
         self.fk = DualKinematics(self.env, slot=self.slot)
         self.fk.check()
@@ -456,6 +459,8 @@ class Adapter:
                 score = float(self.env.reward_manager.get_reward(final_check=True)[self.slot])
                 self.env.success[self.slot] = score > 1 - 1e-3
                 self.env.end_flag[self.slot] = True
+            if self.recording_path is not None:
+                self.env.stop_continuous_recording()
             self.env.save_video(self.slot, str(self.output / "videos" / "episode.mp4"), reason)
         return self.outcome()
 

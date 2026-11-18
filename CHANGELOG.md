@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Share precise local-computation cancellation guidance across Clean, Direct,
+  Hybrid and Code as Policy instead of limiting it to Code as Policy.
+
 - Restore Piper-X quarantine from every unknown operation after restart and
   enforce device-scoped credentials for stop, receipt, lease and stream access.
 

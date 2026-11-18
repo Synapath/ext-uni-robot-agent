@@ -7,8 +7,10 @@ build/
 *.egg
 *.whl
 
-# Test, type-check and coverage caches
+# Local validation files: keep untracked; never force-add this directory.
 /tests/
+
+# Test, type-check and coverage caches
 .pytest_cache/
 .mypy_cache/
 .pyright/
